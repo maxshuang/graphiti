@@ -10,13 +10,15 @@ It uses a **graph database** to represent entities, metrics, lineage, and insigh
 ## 2. Multi-Tier Storage Architecture
 
 ### Core Concept: Three-Tier Intelligent Storage
+
 The system operates as a **multi-layered caching architecture** with three distinct storage tiers:
 
 - **Hot Storage**: Pre-computed Insights, Anomalies, and Correlations - instant agent access (sub-100ms)
-- **Warm Storage**: MetricObservations and MetricSeries - aggregated metrics for analysis (sub-second) 
+- **Warm Storage**: MetricObservations and MetricSeries - aggregated metrics for analysis (sub-second)
 - **Cold Storage**: Raw DataBatch/DataSlice nodes - full fidelity facts and undiscovered patterns (seconds to minutes)
 
 ### Agent Query Strategy
+
 ```mermaid
 flowchart TD
   Query[Agent Query: Why did efficiency drop?]
@@ -52,23 +54,197 @@ flowchart TD
 ```
 
 ### Three-Tier Storage Mapping
-| Tier | Node Types | Retention | Access Pattern | Performance |
-|------|------------|-----------|----------------|-------------|
-| **Hot** | Insight, Anomaly, Correlation | Indefinite (small volume) | Direct lookup by topic/metric | 10-100ms |
-| **Warm** | MetricObservation, MetricSeries | 1-3 years | Traversal + time range queries | 100ms-1s |
-| **Cold** | DataBatch, DataSlice | 90 days → archive | Full scan + ML analysis | Seconds-minutes |
+
+| Tier           | Node Types                      | Retention                 | Access Pattern                 | Performance     |
+| -------------- | ------------------------------- | ------------------------- | ------------------------------ | --------------- |
+| **Hot**  | Insight, Anomaly, Correlation   | Indefinite (small volume) | Direct lookup by topic/metric  | 10-100ms        |
+| **Warm** | MetricObservation, MetricSeries | 1-3 years                 | Traversal + time range queries | 100ms-1s        |
+| **Cold** | DataBatch, DataSlice            | 90 days → archive        | Full scan + ML analysis        | Seconds-minutes |
 
 ### Storage Efficiency Principles
+
 1. **Graduated Promotion**: Cold discovery → Warm aggregation → Hot insights
 2. **Selective Materialization**: Only create Warm/Hot entries for actively queried patterns
 3. **Cascading Invalidation**: New Cold data → invalidate Warm → regenerate Hot insights
 4. **Background Warming**: ML pipelines pre-populate Warm/Hot tiers for high-value patterns
 
 ### Performance Benefits
+
 - **Ultra-fast responses** (10-100ms) from Hot insights
-- **Fast analysis** (100ms-1s) from Warm metrics when Hot insufficient  
+- **Fast analysis** (100ms-1s) from Warm metrics when Hot insufficient
 - **Deep discovery** (seconds-minutes) from Cold storage when needed
 - **Automatic cache promotion** of valuable patterns across tiers
+
+---
+
+## 3. Graphiti Implementation Strategy
+
+### Why Graphiti Fits This Architecture
+
+**Graphiti** is exceptionally well-suited for implementing this three-tier intelligent storage system:
+
+#### **Core Strengths**
+
+1. **Flexible Node/Edge Schema**: Easy to model the layered node types (DataSlice → MetricObservation → Insight) without rigid schema constraints
+2. **Temporal Relationship Handling**: Built-in support for time-based edges (`:NEXT`, `:SUPERSEDED_BY`) crucial for metric time series
+3. **Semantic Search Integration**: LLM-powered search capabilities align perfectly with agent query patterns
+4. **Dynamic Relationship Discovery**: Can surface unexpected correlations between metrics and entities
+5. **Graph Traversal Optimization**: Efficient multi-hop queries for lineage tracing and root cause analysis
+
+### Graphiti Implementation Mapping
+
+| Architecture Layer     | Graphiti Implementation                                               | Performance Tier |
+| ---------------------- | --------------------------------------------------------------------- | ---------------- |
+| **Hot Storage**  | Structured nodes (Insight, Anomaly, Correlation) with semantic search | 10-100ms         |
+| **Warm Storage** | Structured nodes (MetricObservation, MetricSeries) with edges         | 100ms-1s         |
+| **Cold Storage** | Raw episodes (DataBatch/DataSlice content); Bulk episode processing   | Seconds-minutes  |
+
+### Implementation Approach
+
+#### **Phase 1: Foundational Setup**
+
+```python
+# Cold Tier: Raw data ingestion as episodes
+graphiti.add_episodes([
+    RawEpisode(
+        name="POS_Data_May_3",
+        content="Peak restaurant breakfast covers: 340, servers: 3, revenue: $5000",
+        source="pos_system"
+    )
+])
+
+# Warm Tier: Extract structured metric nodes from episodes
+graphiti.add_node("MetricObservation", {
+    "metric_name": "covers_per_server", 
+    "value": 113.3,
+    "time_start": "2025-05-03",
+    "dims": {"restaurant": "Peak", "meal": "breakfast"}
+})
+
+# Hot Tier: Create insight nodes from analysis
+graphiti.add_node("Insight", {
+    "title": "Peak Breakfast Efficiency Analysis",
+    "summary": "113 covers per server indicates optimal staffing level",
+    "severity": "normal",
+    "created_at": "2025-05-03T08:00:00Z"
+})
+```
+
+#### **Phase 2: Hot Tier Intelligence Layer**
+```python
+# Check for existing insight nodes first (not episode content)
+insights = graphiti.search("staffing efficiency Peak restaurant", 
+                         node_types=["Insight", "Anomaly"])
+if not insights:
+    # Generate new insight from warm/cold data
+    metric_obs = graphiti.search("covers per server Peak May 2025",
+                               node_types=["MetricObservation"])
+    
+    # Create structured insight node
+    insight_node = graphiti.add_node("Insight", {
+        "title": "Peak Restaurant Staffing Efficiency",
+        "summary": "Average 113 covers per server indicates optimal staffing",
+        "severity": "normal", 
+        "confidence": 0.85,
+        "created_at": "2025-05-03T08:00:00Z"
+    })
+    
+    # Link insight to supporting metric observations
+    for obs in metric_obs:
+        graphiti.add_edge("GENERATES_INSIGHT", obs.id, insight_node.id)
+```
+
+#### **Phase 3: Agent Integration**
+
+```python
+def agent_query(question: str) -> str:
+    # Hot lookup first
+    hot_results = graphiti.search(question, node_types=["Insight", "Anomaly"])
+    if hot_results:
+        return format_instant_response(hot_results)
+  
+    # Warm lookup fallback  
+    warm_results = graphiti.search(question, node_types=["MetricObservation"])
+    if warm_results:
+        insight = generate_insight_from_metrics(warm_results)
+        graphiti.add_node("Insight", insight)  # Promote to hot
+        return format_analytical_response(insight)
+  
+    # Cold discovery last resort
+    cold_results = graphiti.search(question, include_raw_episodes=True)
+    return deep_analysis_pipeline(cold_results)
+```
+
+### Graphiti Advantages for This Use Case
+
+#### **1. Unified Storage Model**
+
+- Single system handles all three tiers instead of separate databases
+- Seamless transitions between raw episodes and structured nodes
+- Built-in relationship tracking across all storage levels
+
+#### **2. LLM-Native Design**
+
+- Semantic search eliminates need for exact schema matching
+- Natural language queries work directly on stored content
+- Automated relationship inference between concepts
+
+#### **3. Incremental Intelligence**
+
+- Episodes can be progressively enriched with structured nodes/edges
+- No need to redesign schema as understanding evolves
+- Supports both structured and unstructured data patterns
+
+#### **4. Lineage Transparency**
+
+- Clear provenance from raw episodes to derived insights
+- Built-in versioning and temporal tracking
+- Easy root cause analysis through graph traversal
+
+### Current Limitations & Mitigations
+
+#### **Performance Constraints**
+
+- **Issue**: Graph queries can be slower than specialized time-series databases for pure numerical analysis
+- **Mitigation**: Use Graphiti for relationship/lineage queries; consider time-series DB for high-volume numerical aggregations
+
+#### **Scale Considerations**
+
+- **Issue**: Large episode volumes may impact semantic search performance
+- **Mitigation**: Implement tiered episode retention (archive old episodes, keep recent + high-value)
+
+#### **Schema Evolution**
+
+- **Issue**: Changing node/edge schemas after data ingestion requires migration
+- **Mitigation**: Use flexible episode content; add structured nodes incrementally rather than migrating
+
+#### **Complex Aggregations**
+
+- **Issue**: Multi-dimensional metric rollups may require external compute
+- **Mitigation**: Pre-compute common aggregations as MetricObservation nodes; use external pipelines for complex analytics
+
+### Recommended Architecture Pattern
+
+```mermaid
+graph TD
+  Apps[Agent Applications] 
+  
+  Graphiti[Graphiti Core<br/>Episodes + Nodes + Edges]
+  
+  TimeSeries[Time-Series DB<br/>High-volume metrics<br/>Optional]
+  
+  MLPipeline[ML Discovery Pipeline<br/>Pattern detection<br/>Insight generation]
+  
+  ObjectStore[Object Store<br/>Archived episodes<br/>Raw files]
+  
+  Apps --> Graphiti
+  Graphiti --> TimeSeries
+  Graphiti --> MLPipeline  
+  MLPipeline --> Graphiti
+  Graphiti --> ObjectStore
+```
+
+**Key Principle**: Use Graphiti as the **intelligent orchestration layer** that maintains relationships, lineage, and semantic context, while optionally delegating heavy numerical computation to specialized systems.
 
 ---
 
@@ -76,56 +252,61 @@ flowchart TD
 
 Your operational reality (multi-grain, multi-dimensional, derived + composite metrics) requires *three semantic layers* plus an operational/meta layer:
 
-| Layer | Node Types | Purpose |
-|-------|------------|---------|
-| 0. Raw / Facts | DataBatch, DataSlice | Capture ingested mini-batches & normalized fact slices (e.g. (venue=Peak, date=2025-05-03, meal=BREAKFAST) covers=340) |
-| 1. Metric Semantics | MetricDefinition, MetricSeries, MetricObservation | Define, identify, and store evolving metric time series (basic + composite) |
-| 2. Derived Knowledge | CompositeMetricDefinition, Insight, Anomaly, Correlation | Higher-order reasoning outputs and interpretive artifacts |
-| Ops / Lineage | Transformation, SourceFile (optional) | (Optional) external processing context if needed |
+| Layer                | Node Types                                               | Purpose                                                                                                                |
+| -------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 0. Raw / Facts       | DataBatch, DataSlice                                     | Capture ingested mini-batches & normalized fact slices (e.g. (venue=Peak, date=2025-05-03, meal=BREAKFAST) covers=340) |
+| 1. Metric Semantics  | MetricDefinition, MetricSeries, MetricObservation        | Define, identify, and store evolving metric time series (basic + composite)                                            |
+| 2. Derived Knowledge | CompositeMetricDefinition, Insight, Anomaly, Correlation | Higher-order reasoning outputs and interpretive artifacts                                                              |
+| Ops / Lineage        | Transformation, SourceFile (optional)                    | (Optional) external processing context if needed                                                                       |
 
 ### 2.1 Core Node Types (Updated)
-| Node | Key Props | Notes |
-|------|-----------|-------|
-| DataBatch | id, arrived_at, source_type | One ingestion unit (mini-batch) |
-| DataSlice | id, dims:{restaurant, date, meal, role?}, time_start, time_end, raw_attrs:{} | Atomized fact at a grain |
-| MetricDefinition | id, name, granularity, dimension_schema[], type ('basic'/'composite'), version | Semantic contract |
-| MetricSeries | id (hash(def + dims signature)), dims_signature, granularity | Stable identity for a time series |
-| MetricObservation | id, value, time_start, time_end, revision, quality:{...} | One point in a series |
-| CompositeMetricDefinition | id, expression_dsl, output_granularity | Formula tree referencing MetricDefinitions |
-| Insight | id, kind, severity, summary, created_at | Human / algorithm narrative anchor |
-| Anomaly | id, zscore, expected, delta_pct | Specialized insight seed |
-| Correlation | id, window, r_value, p_value | Relationship between series |
+
+| Node                      | Key Props                                                                      | Notes                                      |
+| ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| DataBatch                 | id, arrived_at, source_type                                                    | One ingestion unit (mini-batch)            |
+| DataSlice                 | id, dims:{restaurant, date, meal, role?}, time_start, time_end, raw_attrs:{}   | Atomized fact at a grain                   |
+| MetricDefinition          | id, name, granularity, dimension_schema[], type ('basic'/'composite'), version | Semantic contract                          |
+| MetricSeries              | id (hash(def + dims signature)), dims_signature, granularity                   | Stable identity for a time series          |
+| MetricObservation         | id, value, time_start, time_end, revision, quality:{...}                       | One point in a series                      |
+| CompositeMetricDefinition | id, expression_dsl, output_granularity                                         | Formula tree referencing MetricDefinitions |
+| Insight                   | id, kind, severity, summary, created_at                                        | Human / algorithm narrative anchor         |
+| Anomaly                   | id, zscore, expected, delta_pct                                                | Specialized insight seed                   |
+| Correlation               | id, window, r_value, p_value                                                   | Relationship between series                |
 
 ### 2.2 Edge Types (Updated)
-| Edge | From → To | Purpose |
-|------|-----------|---------|
-| CREATED | DataBatch → DataSlice | Batch membership |
-| FEEDS | DataSlice → MetricObservation | Raw fact contributes to observation |
-| HAS_SERIES | MetricDefinition → MetricSeries | Definition → logical series |
-| HAS_OBSERVATION | MetricSeries → MetricObservation | Series membership |
-| NEXT | MetricObservation → MetricObservation | Temporal chain within a series |
-| ROLLS_UP_INTO | MetricObservation → MetricObservation | Hierarchical temporal aggregation (day→week) |
-| SUPERSEDED_BY | MetricObservation → MetricObservation | Revision lineage |
-| GENERATES_INSIGHT | MetricObservation → Insight | Observation produced insight |
-| USES_METRIC | CompositeMetricDefinition → MetricDefinition | Dependency graph (semantic) |
-| DEFINES_SERIES | CompositeMetricDefinition → MetricSeries | Output binding |
-| DERIVED_FROM | MetricObservation → MetricObservation | Fine-grain lineage (optional) |
-| ABOUT_METRIC_SERIES | Insight → MetricSeries | Insight attachment |
-| ON_OBSERVATION | Anomaly → MetricObservation | Anomaly target |
-| BETWEEN | Correlation → MetricSeries | Correlated pair(s) |
+
+| Edge                | From → To                                    | Purpose                                       |
+| ------------------- | --------------------------------------------- | --------------------------------------------- |
+| CREATED             | DataBatch → DataSlice                        | Batch membership                              |
+| FEEDS               | DataSlice → MetricObservation                | Raw fact contributes to observation           |
+| HAS_SERIES          | MetricDefinition → MetricSeries              | Definition → logical series                  |
+| HAS_OBSERVATION     | MetricSeries → MetricObservation             | Series membership                             |
+| NEXT                | MetricObservation → MetricObservation        | Temporal chain within a series                |
+| ROLLS_UP_INTO       | MetricObservation → MetricObservation        | Hierarchical temporal aggregation (day→week) |
+| SUPERSEDED_BY       | MetricObservation → MetricObservation        | Revision lineage                              |
+| GENERATES_INSIGHT   | MetricObservation → Insight                  | Observation produced insight                  |
+| USES_METRIC         | CompositeMetricDefinition → MetricDefinition | Dependency graph (semantic)                   |
+| DEFINES_SERIES      | CompositeMetricDefinition → MetricSeries     | Output binding                                |
+| DERIVED_FROM        | MetricObservation → MetricObservation        | Fine-grain lineage (optional)                 |
+| ABOUT_METRIC_SERIES | Insight → MetricSeries                       | Insight attachment                            |
+| ON_OBSERVATION      | Anomaly → MetricObservation                  | Anomaly target                                |
+| BETWEEN             | Correlation → MetricSeries                   | Correlated pair(s)                            |
 
 ---
 
 ## 4. Temporal & Hierarchical Linking
+
 **Why NOT only timestamps?** We need fast window queries, revision handling, and rollups.
 
 Mechanisms:
+
 1. `:NEXT` provides an ordered singly-linked list per `MetricSeries` (fast recent traversal, incremental append).
 2. `:ROLLS_UP_INTO` links fine-grain observations to their aggregates (e.g., each breakfast observation → that day aggregate → that week aggregate).
 3. `:SUPERSEDED_BY` preserves correctness when late data arrives (agents ignore superseded nodes).
 4. Optional materialized pointers: store `latest_obs_id` on `MetricSeries` for O(1) head fetch.
 
 Mermaid (condensed):
+
 ```mermaid
 graph TD
   MS[MetricSeries] --> O1[Obs t0]
@@ -139,6 +320,7 @@ graph TD
 ---
 
 ## 5. Composite Metric Mechanics
+
 Composite definitions reference *definitions*, not observations. Runtime expands to current observations.
 
 ```mermaid
@@ -172,6 +354,7 @@ graph TD
 ```
 
 Flow for computing a composite observation:
+
 1. Resolve dependency DAG via `:USES_METRIC` edges.
 2. For each dependency series, fetch aligned observations in target window.
 3. Compute value; create new `MetricObservation` under the composite `MetricSeries`.
@@ -179,6 +362,7 @@ Flow for computing a composite observation:
 5. (Optional) Attach lightweight provenance properties on the observation itself (e.g. `ingestion_id`, `pipeline_label`).
 
 Selective Recompute Trigger:
+
 ```
 MATCH (md:MetricDefinition)<-[:USES_METRIC]-(cmp:CompositeMetricDefinition)
 WHERE md.id IN $changed_basic_metrics
@@ -236,6 +420,7 @@ graph TD
 7. Emit `Insight` nodes for material changes.
 
 Error / Late Data Handling:
+
 - Insert replacement observation → link old `:SUPERSEDED_BY` new.
 - Trigger recompute only for affected windows (bounded by observation time_start).
 
@@ -281,6 +466,7 @@ Backward (WHY?): Observation → `DERIVED_FROM` → source observations → `FEE
 Forward (IMPACT?): Observation ← `DERIVED_FROM`* ← composite observations ← Insights.
 
 Minimal explanation query sketch:
+
 ```cypher
 // Upstream factors for a composite observation
 MATCH (co:MetricObservation {id:$id})-[:DERIVED_FROM]->(src:MetricObservation)
@@ -320,6 +506,7 @@ flowchart TD
 ```
 
 Steps when a user asks: *"Why did staff efficiency drop?"*
+
 1. Resolve target `MetricDefinition` by name embedding / alias.
 2. Fetch `MetricSeries` for dimension signature (restaurant, meal, date range).
 3. Pull recent observation chain via `:NEXT` (limit N) excluding superseded.
@@ -330,6 +517,7 @@ Steps when a user asks: *"Why did staff efficiency drop?"*
 ---
 
 ## 9. Mermaid Schema (Condensed End‑to‑End)
+
 ```mermaid
 graph TD
   DB[DataBatch] --> DS[DataSlice]
@@ -349,15 +537,16 @@ graph TD
 ---
 
 ## 10. Advantages vs Prior Version
-| Concern | Old Design | Refined Design |
-|---------|------------|----------------|
-| Multi-dimensional facts | Forced into generic Entity+MetricVersion | Explicit DataSlice with dims map |
-| Temporal chaining | Implicit by dates | Explicit `:NEXT`, rollups, revisions |
-| Composite clarity | Edge formulas on Metrics | Dedicated CompositeMetricDefinition + expression_dsl |
-| Selective recompute | Hard to scope | Reverse dependency traversal via `:USES_METRIC` |
-| Explainability | Limited | `DERIVED_FROM` + `FEEDS` + provenance |
-| Late data | Overwrite or duplicate | `:SUPERSEDED_BY` chain |
-| Agent retrieval | Ad hoc | Structured retrieval pipeline |
+
+| Concern                 | Old Design                               | Refined Design                                       |
+| ----------------------- | ---------------------------------------- | ---------------------------------------------------- |
+| Multi-dimensional facts | Forced into generic Entity+MetricVersion | Explicit DataSlice with dims map                     |
+| Temporal chaining       | Implicit by dates                        | Explicit `:NEXT`, rollups, revisions               |
+| Composite clarity       | Edge formulas on Metrics                 | Dedicated CompositeMetricDefinition + expression_dsl |
+| Selective recompute     | Hard to scope                            | Reverse dependency traversal via `:USES_METRIC`    |
+| Explainability          | Limited                                  | `DERIVED_FROM` + `FEEDS` + provenance            |
+| Late data               | Overwrite or duplicate                   | `:SUPERSEDED_BY` chain                             |
+| Agent retrieval         | Ad hoc                                   | Structured retrieval pipeline                        |
 
 ---
 
@@ -395,32 +584,34 @@ Phase 4: Correlations, forecasting, optimization (caching & pruning old fine-gra
 ---
 
 ## 12. Trade‑Offs & Mitigations
-| Risk | Impact | Mitigation |
-|------|--------|------------|
-| Observation explosion | Storage & traversal cost | TTL + rollup retention + compress superseded |
-| Cyclic composite defs | Infinite recompute | Cycle detection on `:USES_METRIC` commit |
-| High fan-out dependency updates | Compute lag | Batch recompute queue + window scoping |
-| Late-arriving corrections | Inconsistent views | Revision chain + recompute delta windows |
-| Agent over-fetch | Prompt noise | Curated retrieval (recent N + anomalies + dependency cone) |
+
+| Risk                            | Impact                   | Mitigation                                                 |
+| ------------------------------- | ------------------------ | ---------------------------------------------------------- |
+| Observation explosion           | Storage & traversal cost | TTL + rollup retention + compress superseded               |
+| Cyclic composite defs           | Infinite recompute       | Cycle detection on `:USES_METRIC` commit                 |
+| High fan-out dependency updates | Compute lag              | Batch recompute queue + window scoping                     |
+| Late-arriving corrections       | Inconsistent views       | Revision chain + recompute delta windows                   |
+| Agent over-fetch                | Prompt noise             | Curated retrieval (recent N + anomalies + dependency cone) |
 
 ---
-
 
 ## 13. Concrete Example: Nemacolin Resort Analysis
 
 ### Real Data Context
+
 Based on Nemacolin Resort's F&B operations data (May 2-8, 2025), here's how the system works:
 
 #### A. Raw Data & Processed Facts
+
 ```mermaid
 graph TD
     DB[DataBatch<br/>May 3 POS Import<br/>arrived_at: 06:00]
-    
+  
     DS1[DataSlice<br/>restaurant: Peak<br/>date: 2025-05-03, meal: breakfast<br/>covers: 340]
     DS2[DataSlice<br/>restaurant: Aqueous<br/>date: 2025-05-03, meal: dinner<br/>covers: 180] 
     DS3[DataSlice<br/>source: weather_api<br/>date: 2025-05-03<br/>rain_prob: 100%]
     DS4[DataSlice<br/>event: Kentucky_Derby<br/>venue: Peak, date: 2025-05-03<br/>attendance: 450]
-    
+  
     DB -->|CREATED| DS1
     DB -->|CREATED| DS2
     DB -->|CREATED| DS3
@@ -428,119 +619,125 @@ graph TD
 ```
 
 #### B. Metric Definitions, Series & Observations
+
 ```mermaid
 graph LR
     MD1[MetricDefinition<br/>Total Covers<br/>unit: guest_count<br/>type: basic]
     MD2[MetricDefinition<br/>Revenue Per Cover<br/>unit: dollars<br/>type: basic]
     MD3[MetricDefinition<br/>Staff Efficiency<br/>unit: covers_per_staff<br/>type: basic]
-    
+  
     MS1[MetricSeries<br/>Covers for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
     MS2[MetricSeries<br/>RevPerCover for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
     MS3[MetricSeries<br/>StaffEff for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
-    
+  
     MO1[MetricObservation<br/>2025-05-03: 340 covers<br/>confidence: 0.85]
     MO2[MetricObservation<br/>2025-05-03: $16.22<br/>confidence: 0.92]
     MO3[MetricObservation<br/>2025-05-03: 56.7<br/>confidence: 0.88]
-    
+  
     MD1 -->|HAS_SERIES| MS1
     MD2 -->|HAS_SERIES| MS2
     MD3 -->|HAS_SERIES| MS3
-    
+  
     MS1 -->|HAS_OBSERVATION| MO1
     MS2 -->|HAS_OBSERVATION| MO2
     MS3 -->|HAS_OBSERVATION| MO3
-    
+  
     DS1 -->|FEEDS| MO1
 ```
 
 #### C. Composite Metrics Dependencies
+
 ```mermaid
 graph TD
     MD_Covers[MetricDefinition<br/>Total Covers]
     MD_Revenue[MetricDefinition<br/>Total Revenue]
     MD_Staff[MetricDefinition<br/>Total Staff Hours]
-    
+  
     CMD_RevPerCover[CompositeMetricDefinition<br/>Revenue Per Cover<br/>formula: revenue / covers]
     CMD_StaffEff[CompositeMetricDefinition<br/>Staff Efficiency<br/>formula: covers / staff_count]
     CMD_RevPerHour[CompositeMetricDefinition<br/>Revenue Per Staff Hour<br/>formula: revenue / staff_hours]
-    
+  
     CMD_RevPerCover -->|USES_METRIC| MD_Covers
     CMD_RevPerCover -->|USES_METRIC| MD_Revenue
-    
+  
     CMD_StaffEff -->|USES_METRIC| MD_Covers
     CMD_StaffEff -->|USES_METRIC| MD_Staff
-    
+  
     CMD_RevPerHour -->|USES_METRIC| MD_Revenue
     CMD_RevPerHour -->|USES_METRIC| MD_Staff
-    
+  
     MS_CompRevPerCover[MetricSeries<br/>RevPerCover for Peak]
     MO_CompRevPerCover[MetricObservation<br/>May 3: $14.71]
-    
+  
     CMD_RevPerCover -->|DEFINES_SERIES| MS_CompRevPerCover
     MS_CompRevPerCover -->|HAS_OBSERVATION| MO_CompRevPerCover
 ```
 
 #### D. Insight Generation from Observations
+
 ```mermaid
 graph LR
     MO_Sat[MetricObservation<br/>Saturday Covers<br/>May 3: 340]
     MO_Mon[MetricObservation<br/>Monday Covers<br/>May 5: 170]
-    
+  
     MO_Weather[MetricObservation<br/>Weather Score<br/>May 2-8: 0.0 avg]
-    
+  
     Insight1[Insight<br/>Weekend vs Weekday Pattern<br/>title: 50% drop Mon vs Sat<br/>severity: normal]
-    
+  
     Insight2[Insight<br/>Weather Impact Analysis<br/>title: Rain correlation detected<br/>severity: medium]
-    
+  
     Anomaly1[Anomaly<br/>Covers Drop<br/>zscore: -2.1<br/>expected: 200, actual: 170]
-    
+  
     MO_Sat -->|GENERATES_INSIGHT| Insight1
     MO_Mon -->|GENERATES_INSIGHT| Insight1
     MO_Weather -->|GENERATES_INSIGHT| Insight2
-    
+  
     MO_Mon -->|ON_OBSERVATION| Anomaly1
-    
+  
     MS_Covers[MetricSeries<br/>Peak Covers]
     Insight1 -->|ABOUT_METRIC_SERIES| MS_Covers
 ```
 
 #### E. Data Lineage & Processing Flow
+
 ```mermaid
 graph LR
     DB_POS[DataBatch<br/>POS Sales Import<br/>May 3, 06:00]
     DB_Staff[DataBatch<br/>Staffing Data<br/>May 3, 06:15]
     DB_Weather[DataBatch<br/>Weather API<br/>May 3, 07:00]
-    
+  
     DS_Covers[DataSlice<br/>Peak Breakfast Covers: 340]
     DS_Staff[DataSlice<br/>Peak Servers: 3]
     DS_Weather[DataSlice<br/>Rain Probability: 100%]
-    
+  
     MO_Covers[MetricObservation<br/>Total Covers: 340]
     MO_Staff[MetricObservation<br/>Server Count: 3]
-    
+  
     MO_Efficiency[MetricObservation<br/>Staff Efficiency: 113.3<br/>covers per server]
-    
+  
     Insight_Final[Insight<br/>Optimal staffing achieved<br/>efficiency within target range]
-    
+  
     DB_POS -->|CREATED| DS_Covers
     DB_Staff -->|CREATED| DS_Staff
     DB_Weather -->|CREATED| DS_Weather
-    
+  
     DS_Covers -->|FEEDS| MO_Covers
     DS_Staff -->|FEEDS| MO_Staff
-    
+  
     MO_Efficiency -->|DERIVED_FROM| MO_Covers
     MO_Efficiency -->|DERIVED_FROM| MO_Staff
-    
+  
     MO_Efficiency -->|GENERATES_INSIGHT| Insight_Final
 ```
 
 ### Real Business Questions the System Can Answer
 
 #### 1. **Staffing Optimization Query**
+
 > *"Why did The Peak need 3 servers on Saturday but only 1 on Monday?"*
 
 **Graph Traversal:**
+
 ```cypher
 // Find covers and server observations for Peak restaurant in date range
 MATCH (md_covers:MetricDefinition {name:"Total_Covers"})-[:HAS_SERIES]->(ms_covers:MetricSeries)
@@ -562,9 +759,11 @@ RETURN covers_obs.time_start as date,
 **System Response:** *"Saturday had 340 covers requiring 3 servers (113 covers/server), while Monday had 170 covers with 1 server (170 covers/server). The efficiency ratio suggests Monday was understaffed by 1 server for optimal service."*
 
 #### 2. **Weather Impact Analysis**
+
 > *"How did the 7-day rain streak affect our outdoor dining venues?"*
 
 **Graph Traversal:**
+
 ```cypher
 // Find weather observations and correlate with outdoor covers
 MATCH (weather_md:MetricDefinition {name:"Weather_Score"})-[:HAS_SERIES]->(weather_ms:MetricSeries)
@@ -584,24 +783,26 @@ RETURN covers_ms.dims_signature as venue,
 ```
 
 #### 3. **Revenue Anomaly Detection**
+
 > *"The Peak's revenue dropped to $0 all week - what happened?"*
 
 **System Analysis:**
+
 ```mermaid
 graph TD
     Revenue_Obs[MetricObservation<br/>Peak Revenue: $0<br/>May 2-8, 2025]
     Covers_Obs[MetricObservation<br/>Peak Covers: 340<br/>Saturday May 3]
-    
+  
     Revenue_Anomaly[Anomaly<br/>Zero Revenue Alert<br/>zscore: -5.2<br/>expected: $5000, actual: $0]
-    
+  
     Insight_Anomaly[Insight<br/>Revenue-Covers Mismatch<br/>severity: critical<br/>Revenue system may be down]
-    
+  
     Revenue_Obs -->|ON_OBSERVATION| Revenue_Anomaly
     Revenue_Obs -->|GENERATES_INSIGHT| Insight_Anomaly
     Covers_Obs -->|GENERATES_INSIGHT| Insight_Anomaly
-    
+  
     RevPerCover_Obs[MetricObservation<br/>RevPerCover: $0<br/>DERIVED_FROM revenue + covers]
-    
+  
     RevPerCover_Obs -->|DERIVED_FROM| Revenue_Obs
     RevPerCover_Obs -->|DERIVED_FROM| Covers_Obs
 ```
@@ -609,6 +810,7 @@ graph TD
 ### LLM Agent Decision Flow
 
 #### Agent Query Processing:
+
 1. **Parse Question:** "Should we increase staffing for next weekend?"
 2. **Graph Search:** Find historical weekend patterns + weather forecast + event calendar
 3. **Metric Analysis:** Compare covers/staff ratios, revenue/cover trends
@@ -616,16 +818,17 @@ graph TD
 5. **Recommendation:** "Based on Kentucky Derby event + clear weather forecast, increase servers from 3 to 4 for Saturday"
 
 #### Automated Task Triggering:
+
 ```mermaid
 graph TD
     NewData[New POS Data Arrives]
     MetricCalc[Calculate: Revenue Per Cover]
     Threshold{Revenue < $15/cover?}
-    
+  
     NewData --> MetricCalc
     MetricCalc --> Threshold
     Threshold -->|Yes| TriggerAlert[Trigger: Low Performance Alert]
     Threshold -->|No| Continue[Continue Normal Processing]
-    
+  
     TriggerAlert --> TaskML[Task: Analyze Cause<br/>- Menu analysis<br/>- Service time analysis<br/>- Competition check]
 ```
