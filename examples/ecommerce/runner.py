@@ -21,6 +21,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -34,6 +35,9 @@ load_dotenv()
 neo4j_uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
 neo4j_user = os.environ.get('NEO4J_USER', 'neo4j')
 neo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')
+
+# Use a specific namespace for this example to avoid clearing all data
+ECOMMERCE_GROUP_ID = 'ecommerce-example'
 
 
 def setup_logging():
@@ -80,13 +84,18 @@ async def add_messages(client: Graphiti):
             source=EpisodeType.message,
             reference_time=datetime.now(timezone.utc),
             source_description='Shoe conversation',
+            group_id=ECOMMERCE_GROUP_ID,
         )
 
 
 async def main():
     setup_logging()
     client = Graphiti(neo4j_uri, neo4j_user, neo4j_password)
-    await clear_data(client.driver)
+    
+    # Only clear data for our specific namespace, not the entire database
+    print(f"Clearing data for group_id: {ECOMMERCE_GROUP_ID}")
+    await clear_data(client.driver, group_ids=[ECOMMERCE_GROUP_ID])
+    
     await client.build_indices_and_constraints()
     await ingest_products_data(client)
     await add_messages(client)
@@ -117,6 +126,7 @@ async def ingest_products_data(client: Graphiti):
             episode.source_description,
             episode.reference_time,
             episode.source,
+            group_id=ECOMMERCE_GROUP_ID,
         )
 
 
