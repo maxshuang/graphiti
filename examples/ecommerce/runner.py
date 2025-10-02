@@ -77,28 +77,61 @@ shoe_conversation = [
 
 
 async def add_messages(client: Graphiti):
-    for i, message in enumerate(shoe_conversation):
-        await client.add_episode(
+    # Convert messages to RawEpisode format for bulk processing
+    message_episodes = [
+        RawEpisode(
             name=f'Message {i}',
-            episode_body=message,
+            content=message,
+            source_description='Shoe conversation',
             source=EpisodeType.message,
             reference_time=datetime.now(timezone.utc),
-            source_description='Shoe conversation',
-            group_id=ECOMMERCE_GROUP_ID,
         )
+        for i, message in enumerate(shoe_conversation)
+    ]
+    
+    # Use bulk processing for much better performance
+    print(f"Processing {len(message_episodes)} conversation messages in bulk...")
+    await client.add_episode_bulk(message_episodes, group_id=ECOMMERCE_GROUP_ID)
 
 
 async def main():
     setup_logging()
+    
+    print("🚀 Starting Graphiti ecommerce example with performance optimizations...")
+    start_time = datetime.now(timezone.utc)
+    
     client = Graphiti(neo4j_uri, neo4j_user, neo4j_password)
     
     # Only clear data for our specific namespace, not the entire database
-    print(f"Clearing data for group_id: {ECOMMERCE_GROUP_ID}")
+    print(f"🧹 Clearing data for group_id: {ECOMMERCE_GROUP_ID}")
     await clear_data(client.driver, group_ids=[ECOMMERCE_GROUP_ID])
     
+    print("🏗️  Building indices and constraints...")
     await client.build_indices_and_constraints()
+    
+    print("📦 Ingesting product data...")
     await ingest_products_data(client)
+    
+    print("💬 Adding conversation messages...")
     await add_messages(client)
+    
+    end_time = datetime.now(timezone.utc)
+    total_time = (end_time - start_time).total_seconds()
+    print(f"✅ Completed ecommerce example in {total_time:.2f} seconds!")
+    print(f"🏪 Knowledge graph built with products and conversations in namespace '{ECOMMERCE_GROUP_ID}'")
+    
+    # Quick demonstration of what was created
+    print("\n📊 Knowledge graph summary:")
+    try:
+        search_results = await client.search_("shoes", group_ids=[ECOMMERCE_GROUP_ID])
+        print(f"   • Found {len(search_results.nodes)} relevant entities")
+        print(f"   • Found {len(search_results.edges)} relevant relationships")
+        if search_results.nodes:
+            print(f"   • Sample entities: {[node.name for node in search_results.nodes[:3]]}")
+    except Exception as e:
+        print(f"   • Search demo failed: {e}")
+    
+    await client.close()
 
 
 async def ingest_products_data(client: Graphiti):
@@ -119,15 +152,9 @@ async def ingest_products_data(client: Graphiti):
         for i, product in enumerate(products)
     ]
 
-    for episode in episodes:
-        await client.add_episode(
-            episode.name,
-            episode.content,
-            episode.source_description,
-            episode.reference_time,
-            episode.source,
-            group_id=ECOMMERCE_GROUP_ID,
-        )
+    # Use bulk processing for much better performance
+    print(f"Processing {len(episodes)} product episodes in bulk...")
+    await client.add_episode_bulk(episodes, group_id=ECOMMERCE_GROUP_ID)
 
 
 asyncio.run(main())
