@@ -76,6 +76,36 @@ graph TD
 ## 4. Composite Metric Mechanics
 Composite definitions reference *definitions*, not observations. Runtime expands to current observations.
 
+```mermaid
+graph TD
+  RevDef[MetricDefinition<br/>Total Revenue]
+  CoversDef[MetricDefinition<br/>Total Covers]
+  
+  CompDef[CompositeMetricDefinition<br/>Revenue Per Cover<br/>formula: revenue/covers]
+  
+  RevSeries[MetricSeries<br/>Revenue for Peak]
+  CoversSeries[MetricSeries<br/>Covers for Peak]
+  CompSeries[MetricSeries<br/>RevPerCover for Peak]
+  
+  RevObs[MetricObservation<br/>May 1: $5000]
+  CoversObs[MetricObservation<br/>May 1: 340 covers]
+  CompObs[MetricObservation<br/>May 1: $14.71]
+  
+  CompDef -->|USES_METRIC| RevDef
+  CompDef -->|USES_METRIC| CoversDef
+  CompDef -->|DEFINES_SERIES| CompSeries
+  
+  RevDef -->|HAS_SERIES| RevSeries
+  CoversDef -->|HAS_SERIES| CoversSeries
+  
+  RevSeries -->|HAS_OBSERVATION| RevObs
+  CoversSeries -->|HAS_OBSERVATION| CoversObs
+  CompSeries -->|HAS_OBSERVATION| CompObs
+  
+  CompObs -->|DERIVED_FROM| RevObs
+  CompObs -->|DERIVED_FROM| CoversObs
+```
+
 Flow for computing a composite observation:
 1. Resolve dependency DAG via `:USES_METRIC` edges.
 2. For each dependency series, fetch aligned observations in target window.
@@ -93,6 +123,45 @@ RETURN DISTINCT cmp;
 ---
 
 ## 5. Ingestion & Mini‑Batch Lifecycle
+
+```mermaid
+graph TD
+  Raw[Raw Data Arrives<br/>POS Sales, Weather, etc.]
+  
+  DB[DataBatch<br/>id: batch_001<br/>arrived_at: 2025-05-03 06:00]
+  
+  DS1[DataSlice<br/>Peak, May 3, Breakfast<br/>covers: 340]
+  DS2[DataSlice<br/>Aqueous, May 3, Dinner<br/>covers: 180]
+  DS3[DataSlice<br/>Weather, May 3<br/>rain: 100%]
+  
+  MD1[MetricDefinition<br/>Total Covers]
+  MD2[MetricDefinition<br/>Weather Score]
+  
+  MS1[MetricSeries<br/>Covers for Peak+Breakfast]
+  MS2[MetricSeries<br/>Weather Score Daily]
+  
+  MO1[MetricObservation<br/>May 3: 340 covers]
+  MO2[MetricObservation<br/>May 3: 0.0 score]
+  
+  MO1prev[Previous Observation<br/>May 2: 320 covers]
+  
+  Raw --> DB
+  DB -->|CREATED| DS1
+  DB -->|CREATED| DS2  
+  DB -->|CREATED| DS3
+  
+  DS1 -->|FEEDS| MO1
+  DS3 -->|FEEDS| MO2
+  
+  MD1 -->|HAS_SERIES| MS1
+  MD2 -->|HAS_SERIES| MS2
+  
+  MS1 -->|HAS_OBSERVATION| MO1
+  MS2 -->|HAS_OBSERVATION| MO2
+  
+  MO1prev -->|NEXT| MO1
+```
+
 1. Create `DataBatch`.
 2. Normalize rows → `DataSlice` nodes (`MERGE` to avoid duplication by (dims,time_range)).
 3. For each basic `MetricDefinition`: aggregate relevant slices → create new `MetricObservation`s.
@@ -108,6 +177,41 @@ Error / Late Data Handling:
 ---
 
 ## 6. Lineage & Explainability Paths
+
+```mermaid
+graph LR
+  DS1[DataSlice<br/>Peak Covers: 340]
+  DS2[DataSlice<br/>Peak Revenue: $5000]
+  
+  MO1[MetricObservation<br/>Peak Covers<br/>May 3: 340]
+  MO2[MetricObservation<br/>Peak Revenue<br/>May 3: $5000]
+  
+  CompObs[MetricObservation<br/>Revenue Per Cover<br/>May 3: $14.71]
+  
+  Insight[Insight<br/>RevPerCover dropped<br/>below target $15]
+  
+  DS1 -->|FEEDS| MO1
+  DS2 -->|FEEDS| MO2
+  
+  CompObs -->|DERIVED_FROM| MO1
+  CompObs -->|DERIVED_FROM| MO2
+  
+  CompObs -->|GENERATES_INSIGHT| Insight
+  
+  subgraph "Backward Trace (WHY?)"
+    CompObs -.->|trace back| MO1
+    CompObs -.->|trace back| MO2
+    MO1 -.->|trace back| DS1
+    MO2 -.->|trace back| DS2
+  end
+  
+  subgraph "Forward Impact (WHAT DEPENDS?)"
+    MO1 -.->|impacts| CompObs
+    MO2 -.->|impacts| CompObs  
+    CompObs -.->|triggers| Insight
+  end
+```
+
 Backward (WHY?): Observation → `DERIVED_FROM` → source observations → `FEEDS` → raw DataSlices.
 Forward (IMPACT?): Observation ← `DERIVED_FROM`* ← composite observations ← Insights.
 
@@ -122,6 +226,34 @@ RETURN co, collect(distinct src) as inputs, collect(distinct ds) as raw_sources;
 ---
 
 ## 7. Retrieval Pattern for LLM / Agent
+
+```mermaid
+flowchart TD
+  Query[User: Why did staff efficiency drop?]
+  
+  Step1[1. Resolve MetricDefinition<br/>name embedding/alias match<br/>Staff Efficiency]
+  
+  Step2[2. Find MetricSeries<br/>dimension signature<br/>restaurant + meal + date range]
+  
+  Step3[3. Pull recent observations<br/>follow NEXT chain<br/>exclude SUPERSEDED_BY]
+  
+  Step4[4. Traverse DERIVED_FROM<br/>one hop for decomposition<br/>covers/staff_hours inputs]
+  
+  Step5[5. Fetch Insights/Anomalies<br/>ABOUT_METRIC_SERIES<br/>ON_OBSERVATION]
+  
+  Step6[6. Return structured JSON<br/>values, deltas, inputs, anomalies<br/>for LLM summarization]
+  
+  Response[Agent: Staff efficiency dropped 15%<br/>because covers decreased 20%<br/>while staff hours only reduced 8%]
+  
+  Query --> Step1
+  Step1 --> Step2
+  Step2 --> Step3
+  Step3 --> Step4
+  Step4 --> Step5
+  Step5 --> Step6
+  Step6 --> Response
+```
+
 Steps when a user asks: *"Why did staff efficiency drop?"*
 1. Resolve target `MetricDefinition` by name embedding / alias.
 2. Fetch `MetricSeries` for dimension signature (restaurant, meal, date range).
@@ -165,6 +297,29 @@ graph TD
 ---
 
 ## 10. Implementation Phasing (Actionable)
+
+```mermaid
+graph TD
+  P1[Phase 1: Foundation<br/>✓ MetricDefinition/Series/Observation<br/>✓ NEXT temporal chaining<br/>✓ Basic ingestion pipeline]
+  
+  P2[Phase 2: Composites<br/>✓ CompositeMetricDefinition<br/>✓ USES_METRIC dependency graph<br/>✓ Selective recompute engine]
+  
+  P3[Phase 3: Advanced Features<br/>✓ ROLLS_UP_INTO hierarchies<br/>✓ Anomaly/Insight detection<br/>✓ SUPERSEDED_BY corrections]
+  
+  P4[Phase 4: Optimization<br/>✓ Correlation analysis<br/>✓ Forecasting capabilities<br/>✓ Observation pruning/archival]
+  
+  P1 --> P2
+  P2 --> P3
+  P3 --> P4
+  
+  subgraph "Milestone Gates"
+    M1[✓ Can ingest & query basic metrics]
+    M2[✓ Can compute derived metrics]
+    M3[✓ Can handle corrections & insights]
+    M4[✓ Production-ready performance]
+  end
+```
+
 Phase 1: Definitions, Series, Observations, NEXT chain, ingestion pipeline.
 Phase 2: CompositeMetricDefinition engine + dependency graph + selective recompute.
 Phase 3: Rollups (`:ROLLS_UP_INTO`), anomalies, insights, supersession.
