@@ -21,11 +21,11 @@ The system operates as a **multi-layered caching architecture** with three disti
 flowchart TD
   Query[Agent Query: Why did efficiency drop?]
   
-  HotLookup[1. Check Hot Storage<br/>Existing Insights/Anomalies<br/>~10-100ms]
+  HotLookup[1. Check Hot Storage<br/>Existing Insights/Anomalies<br/>10-100ms]
   
   HotFound{Found relevant<br/>insights?}
   
-  WarmLookup[2. Check Warm Storage<br/>MetricObservations/Series<br/>~100ms-1s]
+  WarmLookup[2. Check Warm Storage<br/>MetricObservations/Series<br/>100ms-1s]
   
   WarmFound{Found sufficient<br/>metric context?}
   
@@ -35,6 +35,9 @@ flowchart TD
   
   ColdDig[3c. Dig into Cold Storage<br/>Analyze raw DataSlices<br/>Deep discovery + cache population]
   
+  HotCache[Update Hot Cache]
+  WarmCache[Update Warm Cache]
+  
   Query --> HotLookup
   HotLookup --> HotFound
   HotFound -->|Yes| InstantResponse
@@ -43,8 +46,8 @@ flowchart TD
   WarmFound -->|Yes| WarmResponse
   WarmFound -->|No| ColdDig
   
-  WarmResponse --> HotCache[Update Hot Cache]
-  ColdDig --> WarmCache[Update Warm Cache]
+  WarmResponse --> HotCache
+  ColdDig --> WarmCache
   ColdDig --> HotCache
 ```
 
