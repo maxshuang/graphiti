@@ -58,6 +58,9 @@ load_dotenv()
 
 falkor_username = os.environ.get('FALKORDB_USERNAME', None)
 falkor_password = os.environ.get('FALKORDB_PASSWORD', None)
+
+# Use a specific namespace for this example to avoid clearing all data
+QUICKSTART_FALKOR_GROUP_ID = 'quickstart-falkor-example'
 falkor_host = os.environ.get('FALKORDB_HOST', 'localhost')
 falkor_port = os.environ.get('FALKORDB_PORT', '6379')
 
@@ -137,6 +140,7 @@ async def main():
                 source=episode['type'],
                 source_description=episode['description'],
                 reference_time=datetime.now(timezone.utc),
+                group_id=QUICKSTART_FALKOR_GROUP_ID,
             )
             print(f'Added episode: Freakonomics Radio {i} ({episode["type"].value})')
 
@@ -151,7 +155,7 @@ async def main():
 
         # Perform a hybrid search combining semantic similarity and BM25 retrieval
         print("\nSearching for: 'Who was the California Attorney General?'")
-        results = await graphiti.search('Who was the California Attorney General?')
+        results = await graphiti.search('Who was the California Attorney General?', group_ids=[QUICKSTART_FALKOR_GROUP_ID])
 
         # Print search results
         print('\nSearch Results:')
@@ -181,7 +185,9 @@ async def main():
             print(f'Using center node UUID: {center_node_uuid}')
 
             reranked_results = await graphiti.search(
-                'Who was the California Attorney General?', center_node_uuid=center_node_uuid
+                'Who was the California Attorney General?', 
+                center_node_uuid=center_node_uuid,
+                group_ids=[QUICKSTART_FALKOR_GROUP_ID]
             )
 
             # Print reranked search results
@@ -219,6 +225,7 @@ async def main():
         node_search_results = await graphiti._search(
             query='California Governor',
             config=node_search_config,
+            group_ids=[QUICKSTART_FALKOR_GROUP_ID],
         )
 
         # Print node search results

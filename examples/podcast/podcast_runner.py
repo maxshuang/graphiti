@@ -35,6 +35,9 @@ neo4j_uri = os.environ.get('NEO4J_URI') or 'bolt://localhost:7687'
 neo4j_user = os.environ.get('NEO4J_USER') or 'neo4j'
 neo4j_password = os.environ.get('NEO4J_PASSWORD') or 'password'
 
+# Use a specific namespace for this example to avoid clearing all data
+PODCAST_GROUP_ID = 'podcast-example'
+
 
 def setup_logging():
     # Create a logger
@@ -82,10 +85,13 @@ async def main(use_bulk: bool = False):
         neo4j_user,
         neo4j_password,
     )
-    await clear_data(client.driver)
+    # Only clear data for our specific namespace, not the entire database
+    print(f"🧹 Clearing data for group_id: {PODCAST_GROUP_ID}")
+    await clear_data(client.driver, group_ids=[PODCAST_GROUP_ID])
+    
     await client.build_indices_and_constraints()
     messages = parse_podcast_messages()
-    group_id = str(uuid4())
+    group_id = PODCAST_GROUP_ID  # Use our defined namespace instead of random UUID
 
     raw_episodes: list[RawEpisode] = []
     for i, message in enumerate(messages[3:14]):

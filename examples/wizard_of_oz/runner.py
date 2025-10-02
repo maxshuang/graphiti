@@ -34,6 +34,9 @@ neo4j_uri = os.environ.get('NEO4J_URI') or 'bolt://localhost:7687'
 neo4j_user = os.environ.get('NEO4J_USER') or 'neo4j'
 neo4j_password = os.environ.get('NEO4J_PASSWORD') or 'password'
 
+# Use a specific namespace for this example to avoid clearing all data
+WIZARD_GROUP_ID = 'wizard-of-oz-example'
+
 
 def setup_logging():
     # Create a logger
@@ -79,7 +82,10 @@ async def main():
     # await client.build_indices_and_constraints()
     # await client.add_episode_bulk(episodes)
 
-    await clear_data(client.driver)
+    # Only clear data for our specific namespace, not the entire database
+    print(f"🧹 Clearing data for group_id: {WIZARD_GROUP_ID}")
+    await clear_data(client.driver, group_ids=[WIZARD_GROUP_ID])
+    
     await client.build_indices_and_constraints()
     for i, chapter in enumerate(messages):
         await client.add_episode(
@@ -87,6 +93,7 @@ async def main():
             episode_body=chapter['content'],
             source_description='Wizard of Oz Transcript',
             reference_time=now + timedelta(seconds=i * 10),
+            group_id=WIZARD_GROUP_ID,
         )
 
 
