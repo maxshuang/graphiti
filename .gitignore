@@ -166,3 +166,6 @@ cache.db*
 
 # All DS_Store files
 .DS_Store
+
+# Data directory - contains business data that shouldn't be in version control
+data/
