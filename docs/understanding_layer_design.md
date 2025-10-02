@@ -299,25 +299,27 @@ graph TD
 ## 10. Implementation Phasing (Actionable)
 
 ```mermaid
-graph TD
-  P1[Phase 1: Foundation<br/>✓ MetricDefinition/Series/Observation<br/>✓ NEXT temporal chaining<br/>✓ Basic ingestion pipeline]
+flowchart TD
+  P1[Phase 1: Foundation<br/>MetricDefinition/Series/Observation<br/>NEXT temporal chaining<br/>Basic ingestion pipeline]
   
-  P2[Phase 2: Composites<br/>✓ CompositeMetricDefinition<br/>✓ USES_METRIC dependency graph<br/>✓ Selective recompute engine]
+  P2[Phase 2: Composites<br/>CompositeMetricDefinition<br/>USES_METRIC dependency graph<br/>Selective recompute engine]
   
-  P3[Phase 3: Advanced Features<br/>✓ ROLLS_UP_INTO hierarchies<br/>✓ Anomaly/Insight detection<br/>✓ SUPERSEDED_BY corrections]
+  P3[Phase 3: Advanced Features<br/>ROLLS_UP_INTO hierarchies<br/>Anomaly/Insight detection<br/>SUPERSEDED_BY corrections]
   
-  P4[Phase 4: Optimization<br/>✓ Correlation analysis<br/>✓ Forecasting capabilities<br/>✓ Observation pruning/archival]
+  P4[Phase 4: Optimization<br/>Correlation analysis<br/>Forecasting capabilities<br/>Observation pruning/archival]
   
-  P1 --> P2
-  P2 --> P3
-  P3 --> P4
+  M1[Milestone 1<br/>Can ingest & query basic metrics]
+  M2[Milestone 2<br/>Can compute derived metrics]
+  M3[Milestone 3<br/>Can handle corrections & insights]
+  M4[Milestone 4<br/>Production-ready performance]
   
-  subgraph "Milestone Gates"
-    M1[✓ Can ingest & query basic metrics]
-    M2[✓ Can compute derived metrics]
-    M3[✓ Can handle corrections & insights]
-    M4[✓ Production-ready performance]
-  end
+  P1 --> M1
+  M1 --> P2
+  P2 --> M2
+  M2 --> P3
+  P3 --> M3
+  M3 --> P4
+  P4 --> M4
 ```
 
 Phase 1: Definitions, Series, Observations, NEXT chain, ingestion pipeline.
@@ -338,104 +340,134 @@ Phase 4: Correlations, forecasting, optimization (caching & pruning old fine-gra
 
 ---
 
-## 12. (Legacy Sections Below Retained for Concrete Example Reference)
-The following original example section is preserved to illustrate the model against real Nemacolin data.
-
----
 
 ## 11. Concrete Example: Nemacolin Resort Analysis
 
 ### Real Data Context
 Based on Nemacolin Resort's F&B operations data (May 2-8, 2025), here's how the system works:
 
-#### A. Entity Nodes
+#### A. Raw Data & Processed Facts
 ```mermaid
 graph TD
-    Store1[Entity: The Peak<br/>type: restaurant<br/>cuisine: casual_dining]
-    Store2[Entity: Aqueous<br/>type: restaurant<br/>cuisine: fine_dining]
-    Weather[Entity: Weather_May2<br/>type: environmental<br/>rain_prob: 100%]
-    Event1[Entity: Kentucky_Derby<br/>type: special_event<br/>venue: The_Peak]
+    DB[DataBatch<br/>May 3 POS Import<br/>arrived_at: 06:00]
+    
+    DS1[DataSlice<br/>restaurant: Peak<br/>date: 2025-05-03, meal: breakfast<br/>covers: 340]
+    DS2[DataSlice<br/>restaurant: Aqueous<br/>date: 2025-05-03, meal: dinner<br/>covers: 180] 
+    DS3[DataSlice<br/>source: weather_api<br/>date: 2025-05-03<br/>rain_prob: 100%]
+    DS4[DataSlice<br/>event: Kentucky_Derby<br/>venue: Peak, date: 2025-05-03<br/>attendance: 450]
+    
+    DB -->|CREATED| DS1
+    DB -->|CREATED| DS2
+    DB -->|CREATED| DS3
+    DB -->|CREATED| DS4
 ```
 
-#### B. Metric Definitions & Values
+#### B. Metric Definitions, Series & Observations
 ```mermaid
 graph LR
-    M1[Metric: Covers_Forecast<br/>unit: guest_count<br/>type: operational]
-    M2[Metric: Revenue_Per_Cover<br/>unit: dollars<br/>type: derived]
-    M3[Metric: Staff_Efficiency<br/>unit: covers_per_staff<br/>type: derived]
+    MD1[MetricDefinition<br/>Total Covers<br/>unit: guest_count<br/>type: basic]
+    MD2[MetricDefinition<br/>Revenue Per Cover<br/>unit: dollars<br/>type: basic]
+    MD3[MetricDefinition<br/>Staff Efficiency<br/>unit: covers_per_staff<br/>type: basic]
     
-    MV1[MetricVersion: 2025-05-02<br/>value: 340 covers<br/>confidence: 0.85]
-    MV2[MetricVersion: 2025-05-02<br/>value: $16.22<br/>confidence: 0.92]
-    MV3[MetricVersion: 2025-05-02<br/>value: 56.7<br/>confidence: 0.88]
+    MS1[MetricSeries<br/>Covers for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
+    MS2[MetricSeries<br/>RevPerCover for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
+    MS3[MetricSeries<br/>StaffEff for Peak+Breakfast<br/>dims: restaurant=Peak, meal=breakfast]
     
-    MV1 -->|VERSION_OF| M1
-    MV2 -->|VERSION_OF| M2
-    MV3 -->|VERSION_OF| M3
+    MO1[MetricObservation<br/>2025-05-03: 340 covers<br/>confidence: 0.85]
+    MO2[MetricObservation<br/>2025-05-03: $16.22<br/>confidence: 0.92]
+    MO3[MetricObservation<br/>2025-05-03: 56.7<br/>confidence: 0.88]
     
-    MV1 -->|MEASURED_ON| Store1
-    MV2 -->|MEASURED_ON| Store1
-    MV3 -->|MEASURED_ON| Store1
+    MD1 -->|HAS_SERIES| MS1
+    MD2 -->|HAS_SERIES| MS2
+    MD3 -->|HAS_SERIES| MS3
+    
+    MS1 -->|HAS_OBSERVATION| MO1
+    MS2 -->|HAS_OBSERVATION| MO2
+    MS3 -->|HAS_OBSERVATION| MO3
+    
+    DS1 -->|FEEDS| MO1
 ```
 
-#### C. Derived Metrics Dependencies
+#### C. Composite Metrics Dependencies
 ```mermaid
 graph TD
-    Covers[Metric: Total_Covers]
-    Revenue[Metric: Total_Revenue]
-    Staff[Metric: Total_Staff_Hours]
+    MD_Covers[MetricDefinition<br/>Total Covers]
+    MD_Revenue[MetricDefinition<br/>Total Revenue]
+    MD_Staff[MetricDefinition<br/>Total Staff Hours]
     
-    RevPerCover[Metric: Revenue_Per_Cover]
-    StaffEff[Metric: Staff_Efficiency]
-    RevPerHour[Metric: Revenue_Per_Staff_Hour]
+    CMD_RevPerCover[CompositeMetricDefinition<br/>Revenue Per Cover<br/>formula: revenue / covers]
+    CMD_StaffEff[CompositeMetricDefinition<br/>Staff Efficiency<br/>formula: covers / staff_count]
+    CMD_RevPerHour[CompositeMetricDefinition<br/>Revenue Per Staff Hour<br/>formula: revenue / staff_hours]
     
-    RevPerCover -->|DERIVED_FROM<br/>formula: total_revenue / total_covers| Covers
-    RevPerCover -->|DERIVED_FROM<br/>formula: total_revenue / total_covers| Revenue
+    CMD_RevPerCover -->|USES_METRIC| MD_Covers
+    CMD_RevPerCover -->|USES_METRIC| MD_Revenue
     
-    StaffEff -->|DERIVED_FROM<br/>formula: total_covers / staff_count| Covers  
-    StaffEff -->|DERIVED_FROM<br/>formula: total_covers / staff_count| Staff
+    CMD_StaffEff -->|USES_METRIC| MD_Covers
+    CMD_StaffEff -->|USES_METRIC| MD_Staff
     
-    RevPerHour -->|DERIVED_FROM<br/>formula: total_revenue / staff_hours| Revenue
-    RevPerHour -->|DERIVED_FROM<br/>formula: total_revenue / staff_hours| Staff
+    CMD_RevPerHour -->|USES_METRIC| MD_Revenue
+    CMD_RevPerHour -->|USES_METRIC| MD_Staff
+    
+    MS_CompRevPerCover[MetricSeries<br/>RevPerCover for Peak]
+    MO_CompRevPerCover[MetricObservation<br/>May 3: $14.71]
+    
+    CMD_RevPerCover -->|DEFINES_SERIES| MS_CompRevPerCover
+    MS_CompRevPerCover -->|HAS_OBSERVATION| MO_CompRevPerCover
 ```
 
-#### D. Real Insight Generation
+#### D. Insight Generation from Observations
 ```mermaid
 graph LR
-    MV_Sat[MetricVersion: Saturday Covers<br/>value: 340<br/>date: 2025-05-03]
-    MV_Mon[MetricVersion: Monday Covers<br/>value: 170<br/>date: 2025-05-05]
+    MO_Sat[MetricObservation<br/>Saturday Covers<br/>May 3: 340]
+    MO_Mon[MetricObservation<br/>Monday Covers<br/>May 5: 170]
     
-    Insight1[Insight: Weekend vs Weekday Pattern<br/>title: 50% drop Mon vs Sat<br/>severity: normal<br/>pattern: expected]
+    MO_Weather[MetricObservation<br/>Weather Score<br/>May 2-8: 0.0 avg]
     
-    MV_Weather[MetricVersion: Rain Impact<br/>7 consecutive days 100% rain<br/>date: 2025-05-02 to 2025-05-08]
+    Insight1[Insight<br/>Weekend vs Weekday Pattern<br/>title: 50% drop Mon vs Sat<br/>severity: normal]
     
-    Insight2[Insight: Weather Impact Analysis<br/>title: Rain correlation with indoor dining<br/>severity: medium<br/>pattern: weather_dependent]
+    Insight2[Insight<br/>Weather Impact Analysis<br/>title: Rain correlation detected<br/>severity: medium]
     
-    MV_Sat -->|GENERATES_INSIGHT| Insight1
-    MV_Mon -->|GENERATES_INSIGHT| Insight1
-    MV_Weather -->|GENERATES_INSIGHT| Insight2
+    Anomaly1[Anomaly<br/>Covers Drop<br/>zscore: -2.1<br/>expected: 200, actual: 170]
+    
+    MO_Sat -->|GENERATES_INSIGHT| Insight1
+    MO_Mon -->|GENERATES_INSIGHT| Insight1
+    MO_Weather -->|GENERATES_INSIGHT| Insight2
+    
+    MO_Mon -->|ON_OBSERVATION| Anomaly1
+    
+    MS_Covers[MetricSeries<br/>Peak Covers]
+    Insight1 -->|ABOUT_METRIC_SERIES| MS_Covers
 ```
 
-#### E. Data Lineage Example
+#### E. Data Lineage & Processing Flow
 ```mermaid
 graph LR
-    DS1[Dataset: POS_Raw_Sales]
-    DS2[Dataset: Staffing_Schedule]
-    DS3[Dataset: Weather_API]
+    DB_POS[DataBatch<br/>POS Sales Import<br/>May 3, 06:00]
+    DB_Staff[DataBatch<br/>Staffing Data<br/>May 3, 06:15]
+    DB_Weather[DataBatch<br/>Weather API<br/>May 3, 07:00]
     
-    T1[Task: Daily_Aggregation<br/>type: ETL<br/>schedule: daily_6am]
-    T2[Task: Metric_Calculation<br/>type: analytics<br/>trigger: data_arrival]
-    T3[Task: Insight_Detection<br/>type: ML<br/>schedule: hourly]
+    DS_Covers[DataSlice<br/>Peak Breakfast Covers: 340]
+    DS_Staff[DataSlice<br/>Peak Servers: 3]
+    DS_Weather[DataSlice<br/>Rain Probability: 100%]
     
-    DS1 -->|INPUT_OF| T1
-    DS2 -->|INPUT_OF| T1
-    T1 -->|OUTPUT_OF| DS4[Dataset: Daily_Metrics]
+    MO_Covers[MetricObservation<br/>Total Covers: 340]
+    MO_Staff[MetricObservation<br/>Server Count: 3]
     
-    DS4 -->|INPUT_OF| T2
-    DS3 -->|INPUT_OF| T2
-    T2 -->|OUTPUT_OF| MV_Final[MetricVersion: Final_Metrics]
+    MO_Efficiency[MetricObservation<br/>Staff Efficiency: 113.3<br/>covers per server]
     
-    MV_Final -->|INPUT_OF| T3
-    T3 -->|OUTPUT_OF| InsightFinal[Insight: Actionable_Recommendations]
+    Insight_Final[Insight<br/>Optimal staffing achieved<br/>efficiency within target range]
+    
+    DB_POS -->|CREATED| DS_Covers
+    DB_Staff -->|CREATED| DS_Staff
+    DB_Weather -->|CREATED| DS_Weather
+    
+    DS_Covers -->|FEEDS| MO_Covers
+    DS_Staff -->|FEEDS| MO_Staff
+    
+    MO_Efficiency -->|DERIVED_FROM| MO_Covers
+    MO_Efficiency -->|DERIVED_FROM| MO_Staff
+    
+    MO_Efficiency -->|GENERATES_INSIGHT| Insight_Final
 ```
 
 ### Real Business Questions the System Can Answer
@@ -445,11 +477,21 @@ graph LR
 
 **Graph Traversal:**
 ```cypher
-MATCH (venue:Entity {name:"The Peak"})<-[:MEASURED_ON]-(covers:MetricVersion)-[:VERSION_OF]->(m:Metric {name:"Total_Covers"})
-WHERE covers.valid_from >= date("2025-05-03") AND covers.valid_from <= date("2025-05-05")
-MATCH (venue)<-[:MEASURED_ON]-(staff:MetricVersion)-[:VERSION_OF]->(sm:Metric {name:"Server_Count"})
-WHERE staff.valid_from = covers.valid_from
-RETURN covers.valid_from, covers.value as covers, staff.value as servers, (covers.value/staff.value) as covers_per_server
+// Find covers and server observations for Peak restaurant in date range
+MATCH (md_covers:MetricDefinition {name:"Total_Covers"})-[:HAS_SERIES]->(ms_covers:MetricSeries)
+WHERE ms_covers.dims_signature CONTAINS "restaurant=Peak"
+MATCH (ms_covers)-[:HAS_OBSERVATION]->(covers_obs:MetricObservation)
+WHERE covers_obs.time_start >= date("2025-05-03") AND covers_obs.time_start <= date("2025-05-05")
+
+MATCH (md_servers:MetricDefinition {name:"Server_Count"})-[:HAS_SERIES]->(ms_servers:MetricSeries)
+WHERE ms_servers.dims_signature CONTAINS "restaurant=Peak"
+MATCH (ms_servers)-[:HAS_OBSERVATION]->(server_obs:MetricObservation)
+WHERE server_obs.time_start = covers_obs.time_start
+
+RETURN covers_obs.time_start as date, 
+       covers_obs.value as covers, 
+       server_obs.value as servers, 
+       (covers_obs.value/server_obs.value) as covers_per_server
 ```
 
 **System Response:** *"Saturday had 340 covers requiring 3 servers (113 covers/server), while Monday had 170 covers with 1 server (170 covers/server). The efficiency ratio suggests Monday was understaffed by 1 server for optimal service."*
@@ -459,11 +501,21 @@ RETURN covers.valid_from, covers.value as covers, staff.value as servers, (cover
 
 **Graph Traversal:**
 ```cypher
-MATCH (w:Entity {type:"weather"})<-[:RELATES_TO]-(venue:Entity {type:"restaurant"})
-MATCH (venue)<-[:MEASURED_ON]-(covers:MetricVersion)-[:VERSION_OF]->(m:Metric {name:"Outdoor_Covers"})
-WHERE covers.valid_from >= date("2025-05-02") AND covers.valid_from <= date("2025-05-08")
-MATCH (insight:Insight)-[:GENERATES_INSIGHT]->(covers)
-RETURN venue.name, covers.value, insight.title, insight.severity
+// Find weather observations and correlate with outdoor covers
+MATCH (weather_md:MetricDefinition {name:"Weather_Score"})-[:HAS_SERIES]->(weather_ms:MetricSeries)
+MATCH (weather_ms)-[:HAS_OBSERVATION]->(weather_obs:MetricObservation)
+WHERE weather_obs.time_start >= date("2025-05-02") AND weather_obs.time_start <= date("2025-05-08")
+
+MATCH (covers_md:MetricDefinition {name:"Outdoor_Covers"})-[:HAS_SERIES]->(covers_ms:MetricSeries)
+MATCH (covers_ms)-[:HAS_OBSERVATION]->(covers_obs:MetricObservation)
+WHERE covers_obs.time_start = weather_obs.time_start
+
+OPTIONAL MATCH (covers_obs)-[:GENERATES_INSIGHT]->(insight:Insight)
+
+RETURN covers_ms.dims_signature as venue, 
+       covers_obs.value as outdoor_covers, 
+       weather_obs.value as weather_score,
+       insight.title as weather_insight
 ```
 
 #### 3. **Revenue Anomaly Detection**
@@ -472,16 +524,21 @@ RETURN venue.name, covers.value, insight.title, insight.severity
 **System Analysis:**
 ```mermaid
 graph TD
-    Revenue0[MetricVersion: Revenue $0<br/>May 2-8, 2025]
-    Covers340[MetricVersion: Covers 340<br/>Saturday May 3]
+    Revenue_Obs[MetricObservation<br/>Peak Revenue: $0<br/>May 2-8, 2025]
+    Covers_Obs[MetricObservation<br/>Peak Covers: 340<br/>Saturday May 3]
     
-    InsightAnomaly[Insight: Revenue-Covers Mismatch<br/>severity: critical<br/>title: Zero revenue despite high covers]
+    Revenue_Anomaly[Anomaly<br/>Zero Revenue Alert<br/>zscore: -5.2<br/>expected: $5000, actual: $0]
     
-    TaskInvestigate[Task: Root Cause Analysis<br/>status: triggered<br/>priority: high]
+    Insight_Anomaly[Insight<br/>Revenue-Covers Mismatch<br/>severity: critical<br/>Revenue system may be down]
     
-    Revenue0 -->|GENERATES_INSIGHT| InsightAnomaly
-    Covers340 -->|GENERATES_INSIGHT| InsightAnomaly
-    InsightAnomaly -->|TRIGGERS| TaskInvestigate
+    Revenue_Obs -->|ON_OBSERVATION| Revenue_Anomaly
+    Revenue_Obs -->|GENERATES_INSIGHT| Insight_Anomaly
+    Covers_Obs -->|GENERATES_INSIGHT| Insight_Anomaly
+    
+    RevPerCover_Obs[MetricObservation<br/>RevPerCover: $0<br/>DERIVED_FROM revenue + covers]
+    
+    RevPerCover_Obs -->|DERIVED_FROM| Revenue_Obs
+    RevPerCover_Obs -->|DERIVED_FROM| Covers_Obs
 ```
 
 ### LLM Agent Decision Flow
