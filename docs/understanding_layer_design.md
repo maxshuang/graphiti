@@ -7,7 +7,69 @@ It uses a **graph database** to represent entities, metrics, lineage, and insigh
 
 ---
 
-## 2. Refined Layered Model (Addressing Data + Metric Evolution)
+## 2. Multi-Tier Storage Architecture
+
+### Core Concept: Three-Tier Intelligent Storage
+The system operates as a **multi-layered caching architecture** with three distinct storage tiers:
+
+- **Hot Storage**: Pre-computed Insights, Anomalies, and Correlations - instant agent access (sub-100ms)
+- **Warm Storage**: MetricObservations and MetricSeries - aggregated metrics for analysis (sub-second) 
+- **Cold Storage**: Raw DataBatch/DataSlice nodes - full fidelity facts and undiscovered patterns (seconds to minutes)
+
+### Agent Query Strategy
+```mermaid
+flowchart TD
+  Query[Agent Query: Why did efficiency drop?]
+  
+  HotLookup[1. Check Hot Storage<br/>Existing Insights/Anomalies<br/>~10-100ms]
+  
+  HotFound{Found relevant<br/>insights?}
+  
+  WarmLookup[2. Check Warm Storage<br/>MetricObservations/Series<br/>~100ms-1s]
+  
+  WarmFound{Found sufficient<br/>metric context?}
+  
+  InstantResponse[3a. Return from<br/>pre-computed insights<br/>Ultra-fast response]
+  
+  WarmResponse[3b. Analyze warm metrics<br/>Generate new insights<br/>Fast response + cache update]
+  
+  ColdDig[3c. Dig into Cold Storage<br/>Analyze raw DataSlices<br/>Deep discovery + cache population]
+  
+  Query --> HotLookup
+  HotLookup --> HotFound
+  HotFound -->|Yes| InstantResponse
+  HotFound -->|No| WarmLookup
+  WarmLookup --> WarmFound
+  WarmFound -->|Yes| WarmResponse
+  WarmFound -->|No| ColdDig
+  
+  WarmResponse --> HotCache[Update Hot Cache]
+  ColdDig --> WarmCache[Update Warm Cache]
+  ColdDig --> HotCache
+```
+
+### Three-Tier Storage Mapping
+| Tier | Node Types | Retention | Access Pattern | Performance |
+|------|------------|-----------|----------------|-------------|
+| **Hot** | Insight, Anomaly, Correlation | Indefinite (small volume) | Direct lookup by topic/metric | 10-100ms |
+| **Warm** | MetricObservation, MetricSeries | 1-3 years | Traversal + time range queries | 100ms-1s |
+| **Cold** | DataBatch, DataSlice | 90 days → archive | Full scan + ML analysis | Seconds-minutes |
+
+### Storage Efficiency Principles
+1. **Graduated Promotion**: Cold discovery → Warm aggregation → Hot insights
+2. **Selective Materialization**: Only create Warm/Hot entries for actively queried patterns
+3. **Cascading Invalidation**: New Cold data → invalidate Warm → regenerate Hot insights
+4. **Background Warming**: ML pipelines pre-populate Warm/Hot tiers for high-value patterns
+
+### Performance Benefits
+- **Ultra-fast responses** (10-100ms) from Hot insights
+- **Fast analysis** (100ms-1s) from Warm metrics when Hot insufficient  
+- **Deep discovery** (seconds-minutes) from Cold storage when needed
+- **Automatic cache promotion** of valuable patterns across tiers
+
+---
+
+## 3. Refined Layered Model (Addressing Data + Metric Evolution)
 
 Your operational reality (multi-grain, multi-dimensional, derived + composite metrics) requires *three semantic layers* plus an operational/meta layer:
 
@@ -51,7 +113,7 @@ Your operational reality (multi-grain, multi-dimensional, derived + composite me
 
 ---
 
-## 3. Temporal & Hierarchical Linking
+## 4. Temporal & Hierarchical Linking
 **Why NOT only timestamps?** We need fast window queries, revision handling, and rollups.
 
 Mechanisms:
@@ -73,7 +135,7 @@ graph TD
 
 ---
 
-## 4. Composite Metric Mechanics
+## 5. Composite Metric Mechanics
 Composite definitions reference *definitions*, not observations. Runtime expands to current observations.
 
 ```mermaid
@@ -122,7 +184,7 @@ RETURN DISTINCT cmp;
 
 ---
 
-## 5. Ingestion & Mini‑Batch Lifecycle
+## 6. Ingestion & Mini‑Batch Lifecycle
 
 ```mermaid
 graph TD
@@ -176,7 +238,7 @@ Error / Late Data Handling:
 
 ---
 
-## 6. Lineage & Explainability Paths
+## 7. Lineage & Explainability Paths
 
 ```mermaid
 graph LR
@@ -225,7 +287,7 @@ RETURN co, collect(distinct src) as inputs, collect(distinct ds) as raw_sources;
 
 ---
 
-## 7. Retrieval Pattern for LLM / Agent
+## 8. Retrieval Pattern for LLM / Agent
 
 ```mermaid
 flowchart TD
@@ -264,7 +326,7 @@ Steps when a user asks: *"Why did staff efficiency drop?"*
 
 ---
 
-## 8. Mermaid Schema (Condensed End‑to‑End)
+## 9. Mermaid Schema (Condensed End‑to‑End)
 ```mermaid
 graph TD
   DB[DataBatch] --> DS[DataSlice]
@@ -283,7 +345,7 @@ graph TD
 
 ---
 
-## 9. Advantages vs Prior Version
+## 10. Advantages vs Prior Version
 | Concern | Old Design | Refined Design |
 |---------|------------|----------------|
 | Multi-dimensional facts | Forced into generic Entity+MetricVersion | Explicit DataSlice with dims map |
@@ -296,7 +358,7 @@ graph TD
 
 ---
 
-## 10. Implementation Phasing (Actionable)
+## 11. Implementation Phasing (Actionable)
 
 ```mermaid
 flowchart TD
@@ -329,7 +391,7 @@ Phase 4: Correlations, forecasting, optimization (caching & pruning old fine-gra
 
 ---
 
-## 11. Trade‑Offs & Mitigations
+## 12. Trade‑Offs & Mitigations
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Observation explosion | Storage & traversal cost | TTL + rollup retention + compress superseded |
@@ -341,7 +403,7 @@ Phase 4: Correlations, forecasting, optimization (caching & pruning old fine-gra
 ---
 
 
-## 11. Concrete Example: Nemacolin Resort Analysis
+## 13. Concrete Example: Nemacolin Resort Analysis
 
 ### Real Data Context
 Based on Nemacolin Resort's F&B operations data (May 2-8, 2025), here's how the system works:
