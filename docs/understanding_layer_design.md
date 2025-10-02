@@ -77,176 +77,7 @@ flowchart TD
 
 ---
 
-## 3. Graphiti Implementation Strategy
 
-### Why Graphiti Fits This Architecture
-
-**Graphiti** is exceptionally well-suited for implementing this three-tier intelligent storage system:
-
-#### **Core Strengths**
-
-1. **Flexible Node/Edge Schema**: Easy to model the layered node types (DataSlice → MetricObservation → Insight) without rigid schema constraints
-2. **Temporal Relationship Handling**: Built-in support for time-based edges (`:NEXT`, `:SUPERSEDED_BY`) crucial for metric time series
-3. **Semantic Search Integration**: LLM-powered search capabilities align perfectly with agent query patterns
-4. **Dynamic Relationship Discovery**: Can surface unexpected correlations between metrics and entities
-5. **Graph Traversal Optimization**: Efficient multi-hop queries for lineage tracing and root cause analysis
-
-### Graphiti Implementation Mapping
-
-| Architecture Layer     | Graphiti Implementation                                               | Performance Tier |
-| ---------------------- | --------------------------------------------------------------------- | ---------------- |
-| **Hot Storage**  | Structured nodes (Insight, Anomaly, Correlation) with semantic search | 10-100ms         |
-| **Warm Storage** | Structured nodes (MetricObservation, MetricSeries) with edges         | 100ms-1s         |
-| **Cold Storage** | Raw episodes (DataBatch/DataSlice content); Bulk episode processing   | Seconds-minutes  |
-
-### Implementation Approach
-
-#### **Phase 1: Foundational Setup**
-
-```python
-# Cold Tier: Raw data ingestion as episodes
-graphiti.add_episodes([
-    RawEpisode(
-        name="POS_Data_May_3",
-        content="Peak restaurant breakfast covers: 340, servers: 3, revenue: $5000",
-        source="pos_system"
-    )
-])
-
-# Warm Tier: Extract structured metric nodes from episodes
-graphiti.add_node("MetricObservation", {
-    "metric_name": "covers_per_server", 
-    "value": 113.3,
-    "time_start": "2025-05-03",
-    "dims": {"restaurant": "Peak", "meal": "breakfast"}
-})
-
-# Hot Tier: Create insight nodes from analysis
-graphiti.add_node("Insight", {
-    "title": "Peak Breakfast Efficiency Analysis",
-    "summary": "113 covers per server indicates optimal staffing level",
-    "severity": "normal",
-    "created_at": "2025-05-03T08:00:00Z"
-})
-```
-
-#### **Phase 2: Hot Tier Intelligence Layer**
-```python
-# Check for existing insight nodes first (not episode content)
-insights = graphiti.search("staffing efficiency Peak restaurant", 
-                         node_types=["Insight", "Anomaly"])
-if not insights:
-    # Generate new insight from warm/cold data
-    metric_obs = graphiti.search("covers per server Peak May 2025",
-                               node_types=["MetricObservation"])
-    
-    # Create structured insight node
-    insight_node = graphiti.add_node("Insight", {
-        "title": "Peak Restaurant Staffing Efficiency",
-        "summary": "Average 113 covers per server indicates optimal staffing",
-        "severity": "normal", 
-        "confidence": 0.85,
-        "created_at": "2025-05-03T08:00:00Z"
-    })
-    
-    # Link insight to supporting metric observations
-    for obs in metric_obs:
-        graphiti.add_edge("GENERATES_INSIGHT", obs.id, insight_node.id)
-```
-
-#### **Phase 3: Agent Integration**
-
-```python
-def agent_query(question: str) -> str:
-    # Hot lookup first
-    hot_results = graphiti.search(question, node_types=["Insight", "Anomaly"])
-    if hot_results:
-        return format_instant_response(hot_results)
-  
-    # Warm lookup fallback  
-    warm_results = graphiti.search(question, node_types=["MetricObservation"])
-    if warm_results:
-        insight = generate_insight_from_metrics(warm_results)
-        graphiti.add_node("Insight", insight)  # Promote to hot
-        return format_analytical_response(insight)
-  
-    # Cold discovery last resort
-    cold_results = graphiti.search(question, include_raw_episodes=True)
-    return deep_analysis_pipeline(cold_results)
-```
-
-### Graphiti Advantages for This Use Case
-
-#### **1. Unified Storage Model**
-
-- Single system handles all three tiers instead of separate databases
-- Seamless transitions between raw episodes and structured nodes
-- Built-in relationship tracking across all storage levels
-
-#### **2. LLM-Native Design**
-
-- Semantic search eliminates need for exact schema matching
-- Natural language queries work directly on stored content
-- Automated relationship inference between concepts
-
-#### **3. Incremental Intelligence**
-
-- Episodes can be progressively enriched with structured nodes/edges
-- No need to redesign schema as understanding evolves
-- Supports both structured and unstructured data patterns
-
-#### **4. Lineage Transparency**
-
-- Clear provenance from raw episodes to derived insights
-- Built-in versioning and temporal tracking
-- Easy root cause analysis through graph traversal
-
-### Current Limitations & Mitigations
-
-#### **Performance Constraints**
-
-- **Issue**: Graph queries can be slower than specialized time-series databases for pure numerical analysis
-- **Mitigation**: Use Graphiti for relationship/lineage queries; consider time-series DB for high-volume numerical aggregations
-
-#### **Scale Considerations**
-
-- **Issue**: Large episode volumes may impact semantic search performance
-- **Mitigation**: Implement tiered episode retention (archive old episodes, keep recent + high-value)
-
-#### **Schema Evolution**
-
-- **Issue**: Changing node/edge schemas after data ingestion requires migration
-- **Mitigation**: Use flexible episode content; add structured nodes incrementally rather than migrating
-
-#### **Complex Aggregations**
-
-- **Issue**: Multi-dimensional metric rollups may require external compute
-- **Mitigation**: Pre-compute common aggregations as MetricObservation nodes; use external pipelines for complex analytics
-
-### Recommended Architecture Pattern
-
-```mermaid
-graph TD
-  Apps[Agent Applications] 
-  
-  Graphiti[Graphiti Core<br/>Episodes + Nodes + Edges]
-  
-  TimeSeries[Time-Series DB<br/>High-volume metrics<br/>Optional]
-  
-  MLPipeline[ML Discovery Pipeline<br/>Pattern detection<br/>Insight generation]
-  
-  ObjectStore[Object Store<br/>Archived episodes<br/>Raw files]
-  
-  Apps --> Graphiti
-  Graphiti --> TimeSeries
-  Graphiti --> MLPipeline  
-  MLPipeline --> Graphiti
-  Graphiti --> ObjectStore
-```
-
-**Key Principle**: Use Graphiti as the **intelligent orchestration layer** that maintains relationships, lineage, and semantic context, while optionally delegating heavy numerical computation to specialized systems.
-
----
 
 ## 3. Refined Layered Model (Addressing Data + Metric Evolution)
 
@@ -832,3 +663,174 @@ graph TD
   
     TriggerAlert --> TaskML[Task: Analyze Cause<br/>- Menu analysis<br/>- Service time analysis<br/>- Competition check]
 ```
+
+---
+
+## 14. Graphiti Implementation Strategy
+
+### Why Graphiti Fits This Architecture
+
+**Graphiti** is exceptionally well-suited for implementing this three-tier intelligent storage system:
+
+#### **Core Strengths**
+
+1. **Flexible Node/Edge Schema**: Easy to model the layered node types (DataSlice → MetricObservation → Insight) without rigid schema constraints
+2. **Temporal Relationship Handling**: Built-in support for time-based edges (`:NEXT`, `:SUPERSEDED_BY`) crucial for metric time series
+3. **Semantic Search Integration**: LLM-powered search capabilities align perfectly with agent query patterns
+4. **Dynamic Relationship Discovery**: Can surface unexpected correlations between metrics and entities
+5. **Graph Traversal Optimization**: Efficient multi-hop queries for lineage tracing and root cause analysis
+
+### Graphiti Implementation Mapping
+
+| Architecture Layer     | Graphiti Implementation                                               | Performance Tier |
+| ---------------------- | --------------------------------------------------------------------- | ---------------- |
+| **Hot Storage**  | Structured nodes (Insight, Anomaly, Correlation) with semantic search | 10-100ms         |
+| **Warm Storage** | Structured nodes (MetricObservation, MetricSeries) with edges         | 100ms-1s         |
+| **Cold Storage** | Raw episodes (DataBatch/DataSlice content); Bulk episode processing   | Seconds-minutes  |
+
+### Implementation Approach
+
+#### **Phase 1: Foundational Setup**
+
+```python
+# Cold Tier: Raw data ingestion as episodes
+graphiti.add_episodes([
+    RawEpisode(
+        name="POS_Data_May_3",
+        content="Peak restaurant breakfast covers: 340, servers: 3, revenue: $5000",
+        source="pos_system"
+    )
+])
+
+# Warm Tier: Extract structured metric nodes from episodes
+graphiti.add_node("MetricObservation", {
+    "metric_name": "covers_per_server", 
+    "value": 113.3,
+    "time_start": "2025-05-03",
+    "dims": {"restaurant": "Peak", "meal": "breakfast"}
+})
+
+# Hot Tier: Create insight nodes from analysis
+graphiti.add_node("Insight", {
+    "title": "Peak Breakfast Efficiency Analysis",
+    "summary": "113 covers per server indicates optimal staffing level",
+    "severity": "normal",
+    "created_at": "2025-05-03T08:00:00Z"
+})
+```
+
+#### **Phase 2: Hot Tier Intelligence Layer**
+```python
+# Check for existing insight nodes first (not episode content)
+insights = graphiti.search("staffing efficiency Peak restaurant", 
+                         node_types=["Insight", "Anomaly"])
+if not insights:
+    # Generate new insight from warm/cold data
+    metric_obs = graphiti.search("covers per server Peak May 2025",
+                               node_types=["MetricObservation"])
+    
+    # Create structured insight node
+    insight_node = graphiti.add_node("Insight", {
+        "title": "Peak Restaurant Staffing Efficiency",
+        "summary": "Average 113 covers per server indicates optimal staffing",
+        "severity": "normal", 
+        "confidence": 0.85,
+        "created_at": "2025-05-03T08:00:00Z"
+    })
+    
+    # Link insight to supporting metric observations
+    for obs in metric_obs:
+        graphiti.add_edge("GENERATES_INSIGHT", obs.id, insight_node.id)
+```
+
+#### **Phase 3: Agent Integration**
+
+```python
+def agent_query(question: str) -> str:
+    # Hot lookup first
+    hot_results = graphiti.search(question, node_types=["Insight", "Anomaly"])
+    if hot_results:
+        return format_instant_response(hot_results)
+  
+    # Warm lookup fallback  
+    warm_results = graphiti.search(question, node_types=["MetricObservation"])
+    if warm_results:
+        insight = generate_insight_from_metrics(warm_results)
+        graphiti.add_node("Insight", insight)  # Promote to hot
+        return format_analytical_response(insight)
+  
+    # Cold discovery last resort
+    cold_results = graphiti.search(question, include_raw_episodes=True)
+    return deep_analysis_pipeline(cold_results)
+```
+
+### Graphiti Advantages for This Use Case
+
+#### **1. Unified Storage Model**
+
+- Single system handles all three tiers instead of separate databases
+- Seamless transitions between raw episodes and structured nodes
+- Built-in relationship tracking across all storage levels
+
+#### **2. LLM-Native Design**
+
+- Semantic search eliminates need for exact schema matching
+- Natural language queries work directly on stored content
+- Automated relationship inference between concepts
+
+#### **3. Incremental Intelligence**
+
+- Episodes can be progressively enriched with structured nodes/edges
+- No need to redesign schema as understanding evolves
+- Supports both structured and unstructured data patterns
+
+#### **4. Lineage Transparency**
+
+- Clear provenance from raw episodes to derived insights
+- Built-in versioning and temporal tracking
+- Easy root cause analysis through graph traversal
+
+### Current Limitations & Mitigations
+
+#### **Performance Constraints**
+
+- **Issue**: Graph queries can be slower than specialized time-series databases for pure numerical analysis
+- **Mitigation**: Use Graphiti for relationship/lineage queries; consider time-series DB for high-volume numerical aggregations
+
+#### **Scale Considerations**
+
+- **Issue**: Large episode volumes may impact semantic search performance
+- **Mitigation**: Implement tiered episode retention (archive old episodes, keep recent + high-value)
+
+#### **Schema Evolution**
+
+- **Issue**: Changing node/edge schemas after data ingestion requires migration
+- **Mitigation**: Use flexible episode content; add structured nodes incrementally rather than migrating
+
+#### **Complex Aggregations**
+
+- **Issue**: Multi-dimensional metric rollups may require external compute
+- **Mitigation**: Pre-compute common aggregations as MetricObservation nodes; use external pipelines for complex analytics
+
+### Recommended Architecture Pattern
+
+```mermaid
+graph TD
+  Apps[Agent Applications] 
+  
+  Graphiti[Graphiti Core<br/>Episodes + Nodes + Edges]
+  
+  TimeSeries[Time-Series DB<br/>High-volume metrics<br/>Optional]
+  
+  MLPipeline[ML Discovery Pipeline<br/>Pattern detection<br/>Insight generation]
+  
+  ObjectStore[Object Store<br/>Archived episodes<br/>Raw files]
+  
+  Apps --> Graphiti
+  Graphiti --> TimeSeries
+  Graphiti --> MLPipeline  
+  MLPipeline --> Graphiti
+  Graphiti --> ObjectStore
+```
+
+**Key Principle**: Use Graphiti as the **intelligent orchestration layer** that maintains relationships, lineage, and semantic context, while optionally delegating heavy numerical computation to specialized systems.
