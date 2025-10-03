@@ -111,6 +111,7 @@ async def main(use_bulk: bool = False):
             entity_types={'Person': Person, 'City': City},
             edge_types={'IS_PRESIDENT_OF': IsPresidentOf},
             edge_type_map={('Person', 'Entity'): ['IS_PRESIDENT_OF']},
+            update_communities=True,
         )
     else:
         for i, message in enumerate(messages[3:14]):
@@ -125,6 +126,7 @@ async def main(use_bulk: bool = False):
                 reference_time=message.actual_timestamp,
                 source_description='Podcast Transcript',
                 group_id=group_id,
+                update_communities=True,
                 entity_types={'Person': Person, 'City': City},
                 edge_types={'IS_PRESIDENT_OF': IsPresidentOf},
                 edge_type_map={('Person', 'Entity'): ['PRESIDENT_OF']},
@@ -132,4 +134,5 @@ async def main(use_bulk: bool = False):
             )
 
 
-asyncio.run(main(False))
+if __name__ == "__main__":
+    asyncio.run(main(False))

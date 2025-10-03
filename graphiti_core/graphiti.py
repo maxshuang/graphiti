@@ -557,15 +557,21 @@ class Graphiti:
 
             # Update any communities
             if update_communities:
-                communities, community_edges = await semaphore_gather(
+                community_results = await semaphore_gather(
                     *[
                         update_community(
-                            self.driver, self.llm_client, self.embedder, node, self.ensure_ascii
+                            self.driver, self.llm_client, self.embedder, node
                         )
                         for node in nodes
                     ],
                     max_coroutines=self.max_coroutines,
                 )
+                # Flatten the results
+                communities = []
+                community_edges = []
+                for community_nodes, edges in community_results:
+                    communities.extend(community_nodes)
+                    community_edges.extend(edges)
             end = time()
             logger.info(f'Completed add_episode in {(end - start) * 1000} ms')
 
@@ -589,6 +595,7 @@ class Graphiti:
         excluded_entity_types: list[str] | None = None,
         edge_types: dict[str, type[BaseModel]] | None = None,
         edge_type_map: dict[tuple[str, str], list[str]] | None = None,
+        update_communities: bool = False,
     ) -> AddBulkEpisodeResults:
         """
         Process multiple episodes in bulk and update the graph.
@@ -854,6 +861,25 @@ class Graphiti:
                 self.embedder,
             )
 
+            communities = []
+            community_edges = []
+
+            # Update any communities
+            if update_communities:
+                community_results = await semaphore_gather(
+                    *[
+                        update_community(
+                            self.driver, self.llm_client, self.embedder, node
+                        )
+                        for node in final_hydrated_nodes
+                    ],
+                    max_coroutines=self.max_coroutines,
+                )
+                # Flatten the results
+                for community_nodes, edges in community_results:
+                    communities.extend(community_nodes)
+                    community_edges.extend(edges)
+
             end = time()
             logger.info(f'Completed add_episode_bulk in {(end - start) * 1000} ms')
 
@@ -862,8 +888,8 @@ class Graphiti:
                 episodic_edges=resolved_episodic_edges,
                 nodes=final_hydrated_nodes,
                 edges=resolved_edges + invalidated_edges,
-                communities=[],
-                community_edges=[],
+                communities=communities,
+                community_edges=community_edges,
             )
 
         except Exception as e:
