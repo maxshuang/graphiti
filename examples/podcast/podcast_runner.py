@@ -111,8 +111,11 @@ async def main(use_bulk: bool = False):
             entity_types={'Person': Person, 'City': City},
             edge_types={'IS_PRESIDENT_OF': IsPresidentOf},
             edge_type_map={('Person', 'Entity'): ['IS_PRESIDENT_OF']},
-            update_communities=True,
         )
+        
+        print("🏘️ Building communities from scratch...")
+        communities, community_edges = await client.build_communities(group_ids=[group_id])
+        print(f"✅ Created {len(communities)} communities with {len(community_edges)} edges")
     else:
         for i, message in enumerate(messages[3:14]):
             episodes = await client.retrieve_episodes(
@@ -126,12 +129,15 @@ async def main(use_bulk: bool = False):
                 reference_time=message.actual_timestamp,
                 source_description='Podcast Transcript',
                 group_id=group_id,
-                update_communities=True,
                 entity_types={'Person': Person, 'City': City},
                 edge_types={'IS_PRESIDENT_OF': IsPresidentOf},
                 edge_type_map={('Person', 'Entity'): ['PRESIDENT_OF']},
                 previous_episode_uuids=episode_uuids,
             )
+
+    print("🏘️ Building communities from scratch...")
+    communities, community_edges = await client.build_communities(group_ids=[group_id])
+    print(f"✅ Created {len(communities)} communities with {len(community_edges)} edges")
 
 
 if __name__ == "__main__":
