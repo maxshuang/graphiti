@@ -45,29 +45,35 @@ async def get_community_clusters(
 
     for group_id in group_ids:
         projection: dict[str, list[Neighbor]] = {}
+        
+        # Optimized: Get all nodes and their relationships in a single query
+        if driver.provider == GraphProvider.KUZU:
+            match_query = """
+            MATCH (n:Entity {group_id: $group_id})-[:RELATES_TO]-(e:RelatesToNode_)-[:RELATES_TO]-(m:Entity {group_id: $group_id})
+            WITH n.uuid AS node_uuid, m.uuid AS neighbor_uuid, count(e) AS edge_count
+            RETURN node_uuid, collect({uuid: neighbor_uuid, count: edge_count}) AS neighbors
+            """
+        else:
+            match_query = """
+            MATCH (n:Entity {group_id: $group_id})-[e:RELATES_TO]-(m:Entity {group_id: $group_id})
+            WITH n.uuid AS node_uuid, m.uuid AS neighbor_uuid, count(e) AS edge_count
+            RETURN node_uuid, collect({uuid: neighbor_uuid, count: edge_count}) AS neighbors
+            """
+        
+        records, _, _ = await driver.execute_query(match_query, group_id=group_id)
+        
+        # Initialize all nodes (including those with no relationships)
         nodes = await EntityNode.get_by_group_ids(driver, [group_id])
         for node in nodes:
-            match_query = """
-                MATCH (n:Entity {group_id: $group_id, uuid: $uuid})-[e:RELATES_TO]-(m: Entity {group_id: $group_id})
-            """
-            if driver.provider == GraphProvider.KUZU:
-                match_query = """
-                MATCH (n:Entity {group_id: $group_id, uuid: $uuid})-[:RELATES_TO]-(e:RelatesToNode_)-[:RELATES_TO]-(m: Entity {group_id: $group_id})
-                """
-            records, _, _ = await driver.execute_query(
-                match_query
-                + """
-                WITH count(e) AS count, m.uuid AS uuid
-                RETURN
-                    uuid,
-                    count
-                """,
-                uuid=node.uuid,
-                group_id=group_id,
-            )
-
-            projection[node.uuid] = [
-                Neighbor(node_uuid=record['uuid'], edge_count=record['count']) for record in records
+            projection[node.uuid] = []
+        
+        # Populate relationships from the single query
+        for record in records:
+            node_uuid = record['node_uuid']
+            neighbors_data = record['neighbors']
+            projection[node_uuid] = [
+                Neighbor(node_uuid=neighbor['uuid'], edge_count=neighbor['count']) 
+                for neighbor in neighbors_data
             ]
 
         cluster_uuids = label_propagation(projection)
@@ -90,9 +96,17 @@ def label_propagation(projection: dict[str, list[Neighbor]]) -> list[list[str]]:
     # 3. Ties are broken by going to the largest community
     # 4. Continue until no communities change during propagation
 
-    community_map = {uuid: i for i, uuid in enumerate(projection.keys())}
+    if not projection:
+        return []
 
-    while True:
+    community_map = {uuid: i for i, uuid in enumerate(projection.keys())}
+    all_node_uuids = set(projection.keys())
+    
+    # Add convergence limits to prevent infinite loops
+    max_iterations = len(projection) * 10  # Reasonable upper bound
+    iteration_count = 0
+
+    while iteration_count < max_iterations:
         no_change = True
         new_community_map: dict[str, int] = {}
 
@@ -101,7 +115,15 @@ def label_propagation(projection: dict[str, list[Neighbor]]) -> list[list[str]]:
 
             community_candidates: dict[int, int] = defaultdict(int)
             for neighbor in neighbors:
-                community_candidates[community_map[neighbor.node_uuid]] += neighbor.edge_count
+                # Fix KeyError: only count neighbors that exist in our node set
+                if neighbor.node_uuid in all_node_uuids:
+                    community_candidates[community_map[neighbor.node_uuid]] += neighbor.edge_count
+            
+            if not community_candidates:
+                # No valid neighbors, keep current community
+                new_community_map[uuid] = curr_community
+                continue
+                
             community_lst = [
                 (count, community) for community, count in community_candidates.items()
             ]
@@ -111,7 +133,7 @@ def label_propagation(projection: dict[str, list[Neighbor]]) -> list[list[str]]:
             if community_candidate != -1 and candidate_rank > 1:
                 new_community = community_candidate
             else:
-                new_community = max(community_candidate, curr_community)
+                new_community = max(community_candidate, curr_community) if community_candidate != -1 else curr_community
 
             new_community_map[uuid] = new_community
 
@@ -122,12 +144,17 @@ def label_propagation(projection: dict[str, list[Neighbor]]) -> list[list[str]]:
             break
 
         community_map = new_community_map
+        iteration_count += 1
+
+    if iteration_count >= max_iterations:
+        logger.warning(f"Label propagation did not converge after {max_iterations} iterations")
 
     community_cluster_map = defaultdict(list)
     for uuid, community in community_map.items():
         community_cluster_map[community].append(uuid)
 
-    clusters = [cluster for cluster in community_cluster_map.values()]
+    # Filter out single-node clusters (communities need at least 2 nodes to be meaningful)
+    clusters = [cluster for cluster in community_cluster_map.values() if len(cluster) >= 2]
     return clusters
 
 
@@ -217,7 +244,16 @@ async def build_communities(
     group_ids: list[str] | None,
     ensure_ascii: bool = True,
 ) -> tuple[list[CommunityNode], list[CommunityEdge]]:
+    logger.info("Starting community cluster detection...")
     community_clusters = await get_community_clusters(driver, group_ids)
+    
+    if not community_clusters:
+        logger.info("No communities detected")
+        return [], []
+    
+    logger.info(f"Found {len(community_clusters)} communities to build")
+    for i, cluster in enumerate(community_clusters):
+        logger.info(f"Community {i+1}: {len(cluster)} nodes")
 
     semaphore = asyncio.Semaphore(MAX_COMMUNITY_BUILD_CONCURRENCY)
 
