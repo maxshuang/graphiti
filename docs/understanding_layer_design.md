@@ -77,6 +77,312 @@ flowchart TD
 
 ---
 
+## 2.1. Enhanced Temporal Architecture
+
+### Critical Problem: Temporal Relationship Modeling
+
+The evolving nature of business data requires sophisticated temporal modeling. The original design's sequential `NEXT` chains are inadequate for real-world temporal queries like "What happened last week?" or trend analysis.
+
+### New Temporal Node Types
+
+#### Time Infrastructure Nodes
+```python
+class TimePeriod(BaseModel):
+    """Explicit time period for efficient temporal queries"""
+    period_type: str          # "day", "week", "month", "quarter", "year"
+    period_start: datetime    # Period start timestamp
+    period_end: datetime      # Period end timestamp  
+    period_label: str         # Human readable: "2025-W19", "May 2025"
+    fiscal_context: Dict[str, Any]  # Business calendar context
+
+class TemporalWindow(BaseModel):
+    """Sliding or tumbling window for analytics"""
+    window_type: str          # "sliding", "tumbling", "session"
+    window_size: str          # "7d", "1h", "30m"
+    window_start: datetime
+    window_end: datetime
+    contains_periods: List[str]  # Period IDs in this window
+
+class TemporalTrend(BaseModel):
+    """Represents trends across time periods"""
+    trend_type: str           # "increasing", "decreasing", "cyclical", "stable"
+    slope: float              # Rate of change per time unit
+    confidence: float         # Statistical confidence in trend
+    period_count: int         # Number of periods analyzed
+    seasonal_pattern: bool    # True if seasonal pattern detected
+
+class SeasonalPattern(BaseModel):
+    """Captures recurring temporal patterns"""
+    pattern_type: str         # "daily", "weekly", "monthly", "yearly"
+    peak_periods: List[str]   # Period labels when peaks occur
+    trough_periods: List[str] # Period labels when troughs occur
+    amplitude: float          # Difference between peak and trough
+    regularity_score: float   # How regular the pattern is (0-1)
+```
+
+#### Enhanced Temporal Edge Types
+```python
+class OccursInEdge(BaseModel):
+    """Observation occurs within a time period"""
+    contribution_weight: float = 1.0  # How much of period this represents
+    partial_period: bool              # True if doesn't cover full period
+
+class FollowsEdge(BaseModel):
+    """Temporal succession between periods/observations"""
+    time_gap_seconds: int     # Actual time gap between periods
+    gap_type: str            # "expected", "delayed", "early"
+
+class ContainsEdge(BaseModel):
+    """Period contains sub-periods (week contains days)"""
+    containment_type: str    # "full", "partial", "overlapping"
+
+class ShowsTrendEdge(BaseModel):
+    """MetricSeries shows a temporal trend"""
+    trend_strength: float    # How strong the trend is (0-1)
+    trend_period: str       # Time period over which trend is observed
+
+class ExhibitsSeasonalityEdge(BaseModel):
+    """MetricSeries exhibits seasonal pattern"""
+    seasonality_strength: float  # Strength of seasonal signal
+    dominant_frequency: str     # Primary seasonal frequency
+```
+
+### Enhanced Three-Tier Storage with Temporal Context
+
+| Tier           | Node Types                                    | Temporal Capability                 | Performance     |
+| -------------- | --------------------------------------------- | ----------------------------------- | --------------- |
+| **Hot**  | Insight, Anomaly, Correlation, TemporalTrend, SeasonalPattern | Pre-computed temporal patterns | 10-100ms        |
+| **Warm** | MetricObservation, MetricSeries, TimePeriod, TemporalWindow | Time-indexed metric queries | 100ms-1s        |
+| **Cold** | DataBatch, DataSlice                         | Raw timestamped data discovery      | Seconds-minutes |
+
+### Complete Temporal Graph Architecture
+
+```mermaid
+graph TD
+  %% TEMPORAL NODES
+  Year2025[TimePeriod: 2025 Year]
+  Week19[TimePeriod: Week 19]  
+  Day0507[TimePeriod: May 7]
+  LastWeek[TemporalWindow: Last 7 Days]
+  
+  %% COLD TIER
+  DB1[DataBatch: Restaurant Report]
+  DS1[DataSlice: Peak Breakfast 340]
+  DS2[DataSlice: Peak Lunch 262] 
+  DS3[DataSlice: Peak Dinner 296]
+  
+  %% WARM TIER
+  MD1[MetricDefinition: Total Covers]
+  MS1[MetricSeries: Peak Restaurant]
+  MO1[MetricObservation: 898 covers]
+  MO2[MetricObservation: 340 breakfast]
+  
+  %% HOT TIER  
+  I1[Insight: Weekend Volume Spike]
+  A1[Anomaly: Breakfast Peak]
+  TT1[TemporalTrend: Weekly Growth]
+  SP1[SeasonalPattern: Weekend Pattern]
+  
+  %% TEMPORAL HIERARCHY
+  Year2025 --> Week19
+  Week19 --> Day0507
+  LastWeek --> Day0507
+  
+  %% DATA FLOW
+  DB1 --> DS1
+  DB1 --> DS2  
+  DB1 --> DS3
+  DS1 --> MO2
+  DS2 --> MO1
+  DS3 --> MO1
+  
+  %% METRIC RELATIONSHIPS
+  MD1 --> MS1
+  MS1 --> MO1
+  MS1 --> MO2
+  
+  %% TEMPORAL LINKAGE - KEY ENHANCEMENT
+  MO1 --> Day0507
+  MO2 --> Day0507
+  DS1 --> Day0507
+  DS2 --> Day0507
+  DS3 --> Day0507
+  
+  %% INTELLIGENCE GENERATION
+  MO1 --> I1
+  MO2 --> A1
+  MS1 --> TT1
+  MS1 --> SP1
+  
+  %% PATTERN RELATIONSHIPS
+  TT1 --> I1
+  SP1 --> I1
+```
+
+### Key Temporal Enhancement Benefits
+
+#### 1. **Direct Time-Range Queries**
+```cypher
+-- "What happened last week?" - Now possible!
+MATCH (window:TemporalWindow {window_type: "sliding", window_size: "7d"})
+WHERE window.window_end = date()
+MATCH (window)-[:CONTAINS]->(period:TimePeriod)
+MATCH (period)<-[:OCCURS_IN]-(obs:MetricObservation)
+RETURN obs.metric_name, obs.measured_value, period.period_label
+ORDER BY period.period_start DESC
+```
+
+#### 2. **Efficient Temporal Aggregation**  
+```cypher  
+-- Weekly rollups without sequential traversal
+MATCH (week:TimePeriod {period_type: "week", period_label: "2025-W19"})
+MATCH (week)-[:CONTAINS]->(day:TimePeriod)
+MATCH (day)<-[:OCCURS_IN]-(obs:MetricObservation {metric_name: "total_covers"})
+RETURN week.period_label, 
+       avg(obs.measured_value) as weekly_avg,
+       sum(obs.measured_value) as weekly_total
+```
+
+#### 3. **Trend Analysis Across Periods**
+```cypher
+-- Multi-period trend analysis
+MATCH (current:TimePeriod {period_label: "2025-W19"})  
+MATCH path = (current)<-[:FOLLOWS*1..4]-(prev:TimePeriod)
+MATCH (prev)<-[:OCCURS_IN]-(obs:MetricObservation)
+RETURN prev.period_label, avg(obs.measured_value) as avg_value
+ORDER BY prev.period_start DESC
+```
+
+#### 4. **Pattern Detection Integration**
+```cypher
+-- Find metrics with seasonal patterns
+MATCH (ms:MetricSeries)-[:EXHIBITS_SEASONALITY]->(sp:SeasonalPattern)
+MATCH (ms)-[:HAS_OBSERVATION]->(obs:MetricObservation)
+-[:OCCURS_IN]->(period:TimePeriod)
+WHERE period.period_label IN sp.peak_periods
+RETURN ms.dims_signature, sp.pattern_type, obs.measured_value
+```
+
+### Complete Node and Edge Type Mapping
+
+#### All Node Types by Tier
+```python
+# TEMPORAL INFRASTRUCTURE (Warm Tier)
+temporal_nodes = {
+    'TimePeriod': TimePeriod,           # day, week, month, quarter, year
+    'TemporalWindow': TemporalWindow,   # sliding/tumbling windows
+}
+
+# COLD TIER - Raw Data Storage  
+cold_tier_nodes = {
+    'DataBatch': DataBatch,             # Ingestion batch metadata
+    'DataSlice': DataSlice,             # Atomic facts with dimensions
+}
+
+# WARM TIER - Structured Metrics
+warm_tier_nodes = {
+    'MetricDefinition': MetricDefinition,           # Business metric schemas
+    'MetricSeries': MetricSeries,                   # Time series for metrics
+    'MetricObservation': MetricObservation,         # Individual measurements
+    'CompositeMetricDefinition': CompositeMetricDefinition,  # Derived metrics
+}
+
+# HOT TIER - Intelligence & Patterns
+hot_tier_nodes = {
+    'Insight': Insight,                 # Business intelligence findings
+    'Anomaly': Anomaly,                 # Statistical outliers  
+    'Correlation': Correlation,         # Metric relationships
+    'TemporalTrend': TemporalTrend,     # Trend analysis results
+    'SeasonalPattern': SeasonalPattern, # Recurring temporal patterns
+}
+```
+
+#### Complete Edge Type Mapping
+```python
+edge_type_map = {
+    # COLD TIER RELATIONSHIPS
+    ('DataBatch', 'DataSlice'): ['CREATED'],
+    
+    # COLD → TEMPORAL LINKAGE  
+    ('DataSlice', 'TimePeriod'): ['OCCURS_IN'],
+    
+    # COLD → WARM DATA FLOW
+    ('DataSlice', 'MetricObservation'): ['FEEDS'],
+    ('DataBatch', 'MetricDefinition'): ['CREATED'],
+    
+    # WARM TIER INTERNAL RELATIONSHIPS
+    ('MetricDefinition', 'MetricSeries'): ['HAS_SERIES'],
+    ('MetricSeries', 'MetricObservation'): ['HAS_OBSERVATION'],
+    ('CompositeMetricDefinition', 'MetricDefinition'): ['USES_METRIC'],
+    ('MetricObservation', 'MetricObservation'): ['DERIVED_FROM'],
+    
+    # WARM → TEMPORAL LINKAGE (KEY ENHANCEMENT)
+    ('MetricObservation', 'TimePeriod'): ['OCCURS_IN'],
+    ('MetricSeries', 'TimePeriod'): ['SPANS_PERIODS'],
+    
+    # TEMPORAL HIERARCHY RELATIONSHIPS  
+    ('TimePeriod', 'TimePeriod'): ['CONTAINS', 'FOLLOWS'],
+    ('TemporalWindow', 'TimePeriod'): ['CONTAINS', 'OVERLAPS'],
+    
+    # WARM → HOT INTELLIGENCE GENERATION
+    ('MetricObservation', 'Insight'): ['GENERATES_INSIGHT'],
+    ('MetricObservation', 'Anomaly'): ['GENERATES_INSIGHT'],  
+    ('MetricObservation', 'Correlation'): ['CORRELATES_WITH'],
+    
+    # TEMPORAL PATTERN RELATIONSHIPS (NEW)
+    ('MetricSeries', 'TemporalTrend'): ['SHOWS_TREND'],
+    ('MetricSeries', 'SeasonalPattern'): ['EXHIBITS_SEASONALITY'],
+    ('TemporalTrend', 'Insight'): ['GENERATES_INSIGHT'],
+    ('SeasonalPattern', 'Insight'): ['GENERATES_INSIGHT'],
+    
+    # HOT TIER CROSS-RELATIONSHIPS
+    ('Insight', 'Anomaly'): ['CORRELATES_WITH'],
+    ('Correlation', 'Insight'): ['GENERATES_INSIGHT'],
+    ('TemporalTrend', 'Anomaly'): ['PREDICTS'],
+    ('SeasonalPattern', 'Anomaly'): ['EXPLAINS'],
+}
+```
+
+### Enhanced Query Capabilities
+
+#### Time-Based Business Questions Now Answerable
+
+| Business Question | Query Pattern | Response Time |
+|------------------|---------------|---------------|
+| "What happened last week?" | `TemporalWindow → TimePeriod → MetricObservation` | 100ms-1s |
+| "Show me monthly trends" | `TimePeriod[month] → TemporalTrend` | 10-100ms |
+| "Find seasonal patterns" | `MetricSeries → SeasonalPattern` | 10-100ms |  
+| "Detect recent anomalies" | `TimePeriod[recent] → Anomaly` | 10-100ms |
+| "Compare this quarter vs last" | `TimePeriod[Q1] vs TimePeriod[Q2]` | 100ms-1s |
+| "Predict next month's performance" | `TemporalTrend + SeasonalPattern` | 10-100ms |
+
+#### Example Complex Temporal Query
+```cypher
+-- "Show me all anomalies in the last month with their seasonal context"
+MATCH (window:TemporalWindow {window_size: "30d"})
+WHERE window.window_end = date()
+
+MATCH (window)-[:CONTAINS]->(period:TimePeriod)
+MATCH (period)<-[:OCCURS_IN]-(obs:MetricObservation)
+-[:GENERATES_INSIGHT]->(anomaly:Anomaly)
+
+MATCH (obs)<-[:HAS_OBSERVATION]-(ms:MetricSeries)
+OPTIONAL MATCH (ms)-[:EXHIBITS_SEASONALITY]->(sp:SeasonalPattern)
+
+RETURN period.period_label,
+       anomaly.severity,
+       anomaly.description,
+       sp.pattern_type,
+       CASE WHEN period.period_label IN sp.peak_periods 
+            THEN "Expected Peak Period"
+            ELSE "Unexpected Timing" END as seasonal_context
+ORDER BY period.period_start DESC
+```
+
+This enhanced temporal architecture transforms the system from a simple sequential chain into a sophisticated time-aware graph that can efficiently answer complex business questions about temporal patterns, trends, and anomalies.
+
+---
+
 
 
 ## 3. Refined Layered Model (Addressing Data + Metric Evolution)
