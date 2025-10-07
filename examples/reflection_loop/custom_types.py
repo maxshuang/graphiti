@@ -27,7 +27,7 @@ class DataSource(BaseModel):
     source_type: str = Field(description="Type: file, database, api, stream")
     connection_string: str = Field(description="How to access this source")
     data_schema: Dict[str, Any] = Field(description="Expected data structure")
-    last_updated: datetime = Field(description="When source was last accessed")
+    source_last_updated: datetime = Field(description="When source was last accessed")  # Renamed to avoid conflicts
 
 
 class MetricDefinition(BaseModel):
@@ -56,10 +56,10 @@ class Insight(BaseModel):
     """Interpreted or generated conclusion (Hot Tier)"""
     insight_id: str = Field(description="Unique insight identifier")
     insight_type: str = Field(description="pattern, anomaly, correlation, trend")
-    summary: str = Field(description="Human-readable insight summary")
+    insight_summary: str = Field(description="Human-readable insight summary")  # Renamed from 'summary'
     confidence_score: float = Field(description="Statistical confidence")
     business_impact: str = Field(description="Potential business impact")
-    generated_at: datetime = Field(description="When insight was created")
+    insight_generated_at: datetime = Field(description="When insight was created")  # Renamed from generated_at to avoid conflicts
     generation_method: str = Field(description="How insight was derived")
 
 
@@ -82,8 +82,8 @@ class MetaInsight(BaseModel):
     meta_insight_id: str = Field(description="Unique meta-insight identifier")
     pattern_description: str = Field(description="Generalized pattern observed")
     occurrence_count: int = Field(description="How many times pattern seen")
-    first_observed: datetime = Field(description="When pattern first detected")
-    last_observed: datetime = Field(description="Most recent occurrence")
+    meta_first_observed: datetime = Field(description="When pattern first detected")  # Renamed to avoid conflicts
+    meta_last_observed: datetime = Field(description="Most recent occurrence")  # Renamed to avoid conflicts
     confidence_level: str = Field(description="low, medium, high")
 
 
@@ -93,7 +93,7 @@ class InsightCluster(BaseModel):
     cluster_theme: str = Field(description="Common theme across insights")
     insight_count: int = Field(description="Number of insights in cluster")
     similarity_threshold: float = Field(description="Similarity threshold used")
-    created_at: datetime = Field(description="When cluster was formed")
+    cluster_created_at: datetime = Field(description="When cluster was formed")  # Renamed from created_at
 
 
 # =============================================================================

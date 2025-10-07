@@ -13,15 +13,23 @@ build upon each other through continuous reflection.
 
 import asyncio
 import logging
+import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Any
 import uuid
 
-# Graphiti imports
+# Add project root to Python path so we can import graphiti_core
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Graphiti imports - Updated based on other examples
 from graphiti_core import Graphiti
-from graphiti_core.helpers import DEFAULT_CONFIG
-from graphiti_core.llm_client import LLMClient
+from graphiti_core.nodes import EpisodeType
+from graphiti_core.utils.bulk_utils import RawEpisode
+from graphiti_core.utils.maintenance.graph_data_operations import clear_data
+from dotenv import load_dotenv
 
 # Custom types
 from custom_types import (
@@ -43,23 +51,38 @@ class ReflectionLoopParser:
     build upon each other to create emergent understanding.
     """
     
-    def __init__(self, config=None):
-        self.config = config or DEFAULT_CONFIG
+    def __init__(self):
+        # Load environment variables like other examples
+        load_dotenv()
+        
+        # Neo4j connection setup (following ecommerce/podcast pattern)
+        self.neo4j_uri = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')
+        self.neo4j_user = os.environ.get('NEO4J_USER', 'neo4j')
+        self.neo4j_password = os.environ.get('NEO4J_PASSWORD', 'password')
+        
+        # Use specific group_id like other examples for data isolation
+        self.group_id = 'reflection-loop-example'
+        
         self.graphiti = None
         self.reflection_cycles = 0
         
     async def initialize(self):
-        """Initialize Graphiti with custom types"""
+        """Initialize Graphiti with custom types (following podcast/ecommerce pattern)"""
         logger.info("🚀 Initializing Reflection Loop Parser...")
         
+        # Initialize Graphiti like other examples
         self.graphiti = Graphiti(
-            self.config,
-            entity_types=ENTITY_TYPES,
-            edge_types=EDGE_TYPES,
-            edge_type_map=EDGE_TYPE_MAP
+            uri=self.neo4j_uri,
+            user=self.neo4j_user, 
+            password=self.neo4j_password
         )
         
-        await self.graphiti.build_indices_if_not_exist()
+        # Clear data for our specific group_id (not entire database)
+        logger.info(f"🧹 Clearing data for group_id: {self.group_id}")
+        await clear_data(self.graphiti.driver, group_ids=[self.group_id])
+        
+        # Build indices and constraints like other examples
+        await self.graphiti.build_indices_and_constraints()
         logger.info("✅ Graphiti initialized with reflection loop types")
         
     async def parse_analysis_report(self, report_path: str) -> Dict[str, Any]:
@@ -82,18 +105,24 @@ class ReflectionLoopParser:
         {report_content}     
         """
         
-        # Add to graphiti for entity extraction
+        # Add to graphiti for entity extraction (following autonomous_parser pattern)
         result = await self.graphiti.add_episode(
             name=f"analysis_report_processing_{datetime.now().isoformat()}",
             episode_body=episode_content,
-            source_description="Analysis report autonomous parsing"
+            source=EpisodeType.text,  # Added source type like other examples
+            source_description="Analysis report autonomous parsing",
+            reference_time=datetime.now(),  # Add required reference_time parameter
+            group_id=self.group_id,  # Use our group_id for isolation
+            entity_types=ENTITY_TYPES,  # Pass our custom types
+            edge_types=EDGE_TYPES,
+            edge_type_map=EDGE_TYPE_MAP
         )
         
         logger.info(f"✅ Parsed report into {len(result.nodes)} nodes and {len(result.edges)} edges")
         return {
             'nodes': len(result.nodes),
             'edges': len(result.edges),
-            'episode_id': result.episode_id
+            'episode_uuid': result.episode.uuid  # Fixed attribute access
         }
     
     async def run_reflection_cycle(self) -> Dict[str, Any]:
@@ -109,11 +138,12 @@ class ReflectionLoopParser:
         self.reflection_cycles += 1
         logger.info(f"🔍 Running reflection cycle #{self.reflection_cycles}")
         
-        # Search for existing insights to reflect upon
+        # Search for existing insights to reflect upon (add group_ids filter)
         insights_query = "insights patterns observations conclusions analysis"
         search_results = await self.graphiti.search(
             query=insights_query,
-            num_results=20
+            num_results=20,
+            group_ids=[self.group_id]  # Filter to our data only
         )
         
         if not search_results.nodes:
@@ -123,8 +153,8 @@ class ReflectionLoopParser:
         # Extract insight content for pattern analysis
         insight_content = []
         for node in search_results.nodes:
-            if hasattr(node, 'summary'):
-                insight_content.append(f"Insight: {node.summary}")
+            if hasattr(node, 'insight_summary'):
+                insight_content.append(f"Insight: {node.insight_summary}")
             elif hasattr(node, 'business_impact'):
                 insight_content.append(f"Business Impact: {node.business_impact}")
         
@@ -151,11 +181,17 @@ class ReflectionLoopParser:
         Generate new meta-insights about what we're learning about the business.
         """
         
-        # Add reflection episode
+        # Add reflection episode (with proper parameters)
         result = await self.graphiti.add_episode(
             name=f"reflection_cycle_{self.reflection_cycles}_{datetime.now().isoformat()}",
             episode_body=reflection_episode,
-            source_description="Reflection loop pattern discovery"
+            source=EpisodeType.text,
+            source_description="Reflection loop pattern discovery",
+            reference_time=datetime.now(),  # Add required reference_time parameter
+            group_id=self.group_id,
+            entity_types=ENTITY_TYPES,  # Keep using our custom types
+            edge_types=EDGE_TYPES,
+            edge_type_map=EDGE_TYPE_MAP
         )
         
         logger.info(f"🧠 Reflection cycle generated {len(result.nodes)} new nodes, {len(result.edges)} new edges")
@@ -177,7 +213,8 @@ class ReflectionLoopParser:
         
         search_results = await self.graphiti.search(
             query=question,
-            num_results=15
+            num_results=15,
+            group_ids=[self.group_id]  # Filter to our data only
         )
         
         # Analyze what types of entities we found
@@ -237,43 +274,50 @@ async def main():
     parser = ReflectionLoopParser()
     await parser.initialize()
     
-    # Parse the analysis report
-    report_path = "/Users/maxhuang/projects/llm/graphiti/examples/data/analysis_report.md"
-    parse_results = await parser.parse_analysis_report(report_path)
-    print(f"\n📊 Initial Parse Results:")
-    print(f"   Nodes: {parse_results['nodes']}")
-    print(f"   Edges: {parse_results['edges']}")
-    
-    # TEMPORARILY COMMENTED OUT - Testing just the parsing phase
-    # Run reflection loops to build understanding
-    # print(f"\n🔄 Running Reflection Loops...")
-    # reflection_results = await parser.continuous_reflection_loop(max_cycles=3)
-    # 
-    # for i, result in enumerate(reflection_results):
-    #     print(f"   Cycle {i+1}: {result.get('new_insights', 0)} new insights, {result.get('new_edges', 0)} new edges")
-    
-    # Test understanding queries (without reflection loops)
-    print(f"\n❓ Testing Initial Understanding Queries:")
-    
-    test_questions = [
-        "What are the main business trends identified?",
-        "Which metrics show concerning patterns?", 
-        "What seasonal patterns were discovered?",
-        "What recommendations were made?",
-        "How do different business areas relate?"
-    ]
-    
-    for question in test_questions:
-        result = await parser.query_understanding(question)
-        print(f"\nQ: {question}")
-        print(f"A: Found {result['nodes_found']} relevant nodes, {result['edges_found']} relationships")
-        print(f"   Entity types: {result['entity_types']}")
-        if result['relationships']:
-            print(f"   Relationships: {result['relationships'][:3]}...")  # Show first 3
-    
-    print(f"\n✅ Initial Parse Demo Complete!")
-    print(f"   Focus: Testing entity extraction from analysis report")
-    # print(f"   Total reflection cycles: {parser.reflection_cycles}")
+    # Close client at end like other examples
+    try:
+        # Parse the analysis report
+        report_path = "/Users/maxhuang/projects/llm/graphiti/examples/data/analysis_report.md"
+        parse_results = await parser.parse_analysis_report(report_path)
+        print(f"\n📊 Initial Parse Results:")
+        print(f"   Nodes: {parse_results['nodes']}")
+        print(f"   Edges: {parse_results['edges']}")
+        
+        # TEMPORARILY COMMENTED OUT - Testing just the parsing phase
+        # Run reflection loops to build understanding
+        # print(f"\n🔄 Running Reflection Loops...")
+        # reflection_results = await parser.continuous_reflection_loop(max_cycles=3)
+        # 
+        # for i, result in enumerate(reflection_results):
+        #     print(f"   Cycle {i+1}: {result.get('new_insights', 0)} new insights, {result.get('new_edges', 0)} new edges")
+        
+        # TEMPORARILY COMMENTED OUT - Testing understanding queries (without reflection loops)
+        # print(f"\n❓ Testing Initial Understanding Queries:")
+        # 
+        # test_questions = [
+        #     "What are the main business trends identified?",
+        #     "Which metrics show concerning patterns?", 
+        #     "What seasonal patterns were discovered?",
+        #     "What recommendations were made?",
+        #     "How do different business areas relate?"
+        # ]
+        # 
+        # for question in test_questions:
+        #     result = await parser.query_understanding(question)
+        #     print(f"\nQ: {question}")
+        #     print(f"A: Found {result['nodes_found']} relevant nodes, {result['edges_found']} relationships")
+        #     print(f"   Entity types: {result['entity_types']}")
+        #     if result['relationships']:
+        #         print(f"   Relationships: {result['relationships'][:3]}...")  # Show first 3
+        
+        print(f"\n✅ Initial Parse Demo Complete!")
+        print(f"   Focus: Testing entity extraction from analysis report")
+        # print(f"   Total reflection cycles: {parser.reflection_cycles}")
+        
+    finally:
+        # Always close the client connection like other examples
+        if parser.graphiti:
+            await parser.graphiti.close()
 
 
 if __name__ == "__main__":
