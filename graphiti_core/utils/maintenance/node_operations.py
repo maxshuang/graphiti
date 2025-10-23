@@ -471,6 +471,11 @@ async def extract_attributes_from_node(
         entity_type is not None and len(entity_type.model_fields) != 0
     )
 
+    # TARS DEBUG: Log what entity type and fields we're extracting
+    if has_entity_attributes and entity_type:
+        logger.info(f'[TARS DEBUG] Extracting attributes for {node.name} with entity_type: {entity_type.__name__}')
+        logger.info(f'[TARS DEBUG] Expected fields: {list(entity_type.model_fields.keys())}')
+
     llm_response = (
         (
             await llm_client.generate_response(
@@ -500,6 +505,9 @@ async def extract_attributes_from_node(
     if has_entity_attributes and entity_type is not None:
         entity_type(**llm_response)
     node_attributes = {key: value for key, value in llm_response.items()}
+
+    # TARS DEBUG: Log what attributes we're setting
+    logger.info(f'[TARS DEBUG] Setting attributes for {node.name}: {node_attributes}')
 
     node.attributes.update(node_attributes)
 

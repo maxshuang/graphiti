@@ -496,10 +496,15 @@ class Graphiti:
             )
 
             # Extract entities as nodes
+            logger.info(f'[TARS DEBUG] Starting node extraction from episode: {name}')
 
             extracted_nodes = await extract_nodes(
                 self.clients, episode, previous_episodes, entity_types, excluded_entity_types
             )
+
+            logger.info(f'[TARS DEBUG] Extracted {len(extracted_nodes)} nodes')
+            for i, node in enumerate(extracted_nodes, 1):
+                logger.info(f'[TARS DEBUG] Node {i}: {node}')
 
             # Extract edges and resolve nodes
             (nodes, uuid_map, _), extracted_edges = await semaphore_gather(
