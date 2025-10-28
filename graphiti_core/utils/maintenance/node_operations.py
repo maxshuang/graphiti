@@ -503,8 +503,12 @@ async def extract_attributes_from_node(
         node.summary = summary_response.get('summary', '')
 
     if has_entity_attributes and entity_type is not None:
-        entity_type(**llm_response)
-    node_attributes = {key: value for key, value in llm_response.items()}
+        # Create Pydantic model instance and use model_dump(mode='json') to apply serializers
+        # mode='json' ensures datetime and other non-JSON types are serialized
+        validated_model = entity_type(**llm_response)
+        node_attributes = validated_model.model_dump(mode='json')
+    else:
+        node_attributes = {key: value for key, value in llm_response.items()}
 
     # TARS DEBUG: Log what attributes we're setting
     logger.info(f'[TARS DEBUG] Setting attributes for {node.name}: {node_attributes}')
