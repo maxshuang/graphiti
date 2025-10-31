@@ -201,6 +201,8 @@ def _resolve_with_similarity(
     state: DedupResolutionState,
 ) -> None:
     """Attempt deterministic resolution using exact name hits and fuzzy MinHash comparisons."""
+    from loguru import logger
+
     for idx, node in enumerate(extracted_nodes):
         normalized_exact = _normalize_string_exact(node.name)
         normalized_fuzzy = _normalize_name_for_fuzzy(node.name)
@@ -209,15 +211,32 @@ def _resolve_with_similarity(
             state.unresolved_indices.append(idx)
             continue
 
-        existing_matches = indexes.normalized_existing.get(normalized_exact, [])
+        # Get candidate matches by normalized name
+        existing_matches_all = indexes.normalized_existing.get(normalized_exact, [])
+
+        # TARS FIX: Filter matches to only same entity type (labels)
+        # Only dedupe nodes if they have the same non-Entity labels
+        node_type_labels = set(node.labels) - {'Entity'}
+        existing_matches = [
+            match for match in existing_matches_all
+            if (set(match.labels) - {'Entity'}) == node_type_labels
+        ]
+
+        # TARS DEBUG: Log deduplication decisions
+        if len(existing_matches_all) != len(existing_matches):
+            filtered_count = len(existing_matches_all) - len(existing_matches)
+            logger.info(f'[TARS DEBUG] Dedup: "{node.name}" labels={node.type_labels} - filtered out {filtered_count} candidates with different types')
+
         if len(existing_matches) == 1:
             match = existing_matches[0]
+            logger.info(f'[TARS DEBUG] Dedup: Exact match for "{node.name}" labels={node_type_labels} -> existing node "{match.name}" uuid={match.uuid}')
             state.resolved_nodes[idx] = match
             state.uuid_map[node.uuid] = match.uuid
             if match.uuid != node.uuid:
                 state.duplicate_pairs.append((node, match))
             continue
         if len(existing_matches) > 1:
+            logger.info(f'[TARS DEBUG] Dedup: Multiple matches for "{node.name}" - marking as unresolved')
             state.unresolved_indices.append(idx)
             continue
 
@@ -227,9 +246,19 @@ def _resolve_with_similarity(
         for band_index, band in enumerate(_lsh_bands(signature)):
             candidate_ids.update(indexes.lsh_buckets.get((band_index, band), []))
 
+        # TARS FIX: Filter fuzzy candidates to only same entity type
+        filtered_candidate_ids = []
+        for candidate_id in candidate_ids:
+            candidate = indexes.nodes_by_uuid.get(candidate_id)
+            if candidate and (set(candidate.labels) - {'Entity'}) == node_type_labels:
+                filtered_candidate_ids.append(candidate_id)
+
+        if len(candidate_ids) != len(filtered_candidate_ids):
+            logger.info(f'[TARS DEBUG] Dedup: Fuzzy search for "{node.name}" - filtered {len(candidate_ids) - len(filtered_candidate_ids)} candidates with different types')
+
         best_candidate: EntityNode | None = None
         best_score = 0.0
-        for candidate_id in candidate_ids:
+        for candidate_id in filtered_candidate_ids:
             candidate_shingles = indexes.shingles_by_candidate.get(candidate_id, set())
             score = _jaccard_similarity(shingles, candidate_shingles)
             if score > best_score:
@@ -237,12 +266,14 @@ def _resolve_with_similarity(
                 best_candidate = indexes.nodes_by_uuid.get(candidate_id)
 
         if best_candidate is not None and best_score >= _FUZZY_JACCARD_THRESHOLD:
+            logger.info(f'[TARS DEBUG] Dedup: Fuzzy match for "{node.name}" labels={node_type_labels} -> existing node "{best_candidate.name}" (score={best_score:.2f})')
             state.resolved_nodes[idx] = best_candidate
             state.uuid_map[node.uuid] = best_candidate.uuid
             if best_candidate.uuid != node.uuid:
                 state.duplicate_pairs.append((node, best_candidate))
             continue
 
+        logger.info(f'[TARS DEBUG] Dedup: No match for "{node.name}" labels={node_type_labels} - creating new node')
         state.unresolved_indices.append(idx)
 
 

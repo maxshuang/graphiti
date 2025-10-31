@@ -395,6 +395,7 @@ class Graphiti:
         previous_episode_uuids: list[str] | None = None,
         edge_types: dict[str, type[BaseModel]] | None = None,
         edge_type_map: dict[tuple[str, str], list[str]] | None = None,
+        custom_prompt: str = '',
     ) -> AddEpisodeResults:
         """
         Process an episode and update the graph.
@@ -499,7 +500,7 @@ class Graphiti:
             logger.info(f'[TARS DEBUG] Starting node extraction from episode: {name}')
 
             extracted_nodes = await extract_nodes(
-                self.clients, episode, previous_episodes, entity_types, excluded_entity_types
+                self.clients, episode, previous_episodes, entity_types, excluded_entity_types, custom_prompt
             )
 
             logger.info(f'[TARS DEBUG] Extracted {len(extracted_nodes)} nodes')
@@ -526,6 +527,10 @@ class Graphiti:
                 ),
                 max_coroutines=self.max_coroutines,
             )
+
+            logger.info(f'[TARS DEBUG] After resolve_extracted_nodes: {len(nodes)} nodes')
+            for i, node in enumerate(nodes, 1):
+                logger.info(f'[TARS DEBUG] Resolved Node {i}: {node.name} labels={node.labels}')
 
             edges = resolve_edge_pointers(extracted_edges, uuid_map)
 
