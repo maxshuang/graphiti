@@ -136,6 +136,20 @@ async def add_nodes_and_edges_bulk(
     entity_edges: list[EntityEdge],
     embedder: EmbedderClient,
 ):
+    # TARS DEBUG: Log insertion phase
+    logger.info(f'[TARS DEBUG] === INSERTION PHASE START ===')
+    logger.info(f'[TARS DEBUG] Inserting: {len(entity_nodes)} entity nodes, {len(entity_edges)} entity edges')
+
+    # Log entity edge types breakdown
+    edge_types_count: dict[str, int] = {}
+    for edge in entity_edges:
+        edge_types_count[edge.name] = edge_types_count.get(edge.name, 0) + 1
+
+    if edge_types_count:
+        logger.info(f'[TARS DEBUG] Edge types breakdown:')
+        for edge_type, count in sorted(edge_types_count.items()):
+            logger.info(f'[TARS DEBUG]   {edge_type}: {count}')
+
     session = driver.session()
     try:
         await session.execute_write(
@@ -147,6 +161,8 @@ async def add_nodes_and_edges_bulk(
             embedder,
             driver=driver,
         )
+        logger.info(f'[TARS DEBUG] === INSERTION PHASE END ===')
+        logger.info(f'[TARS DEBUG] Successfully inserted all nodes and edges')
     finally:
         await session.close()
 

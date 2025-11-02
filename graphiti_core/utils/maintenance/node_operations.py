@@ -273,6 +273,28 @@ async def _resolve_with_llm(
         for i, node in enumerate(llm_extracted_nodes)
     ]
 
+    # TARS FIX: Filter existing candidates by matching entity type for each extracted node
+    # This prevents LLM from seeing candidates with different types (e.g., DataSource vs MetricObservation)
+    # Create a mapping: extracted_node_id -> list of type-filtered candidate indices
+    type_filtered_candidates_map: dict[int, list[int]] = {}
+
+    for i, extracted_node in enumerate(llm_extracted_nodes):
+        extracted_type_labels = set(extracted_node.labels) - {'Entity'}
+        matching_candidates = []
+
+        for idx, candidate in enumerate(indexes.existing_nodes):
+            candidate_type_labels = set(candidate.labels) - {'Entity'}
+            if candidate_type_labels == extracted_type_labels:
+                matching_candidates.append(idx)
+
+        type_filtered_candidates_map[i] = matching_candidates
+
+        if len(matching_candidates) < len(indexes.existing_nodes):
+            filtered_count = len(indexes.existing_nodes) - len(matching_candidates)
+            logger.info(f'[TARS DEBUG] LLM dedup: Node "{extracted_node.name}" type={extracted_type_labels} - filtered out {filtered_count} candidates with different types')
+
+    # Build existing_nodes_context with ALL candidates (LLM will still see them)
+    # But we'll validate the response against type_filtered_candidates_map
     existing_nodes_context = [
         {
             **{
@@ -333,10 +355,20 @@ async def _resolve_with_llm(
             resolved_node = extracted_node
             logger.info(f'[TARS DEBUG] LLM decision: "{extracted_node.name}" -> NO DUPLICATE (new node)')
         elif 0 <= duplicate_idx < len(indexes.existing_nodes):
-            resolved_node = indexes.existing_nodes[duplicate_idx]
-            extracted_labels = set(extracted_node.labels) - {'Entity'}
-            resolved_labels = set(resolved_node.labels) - {'Entity'}
-            logger.info(f'[TARS DEBUG] LLM decision: "{extracted_node.name}" labels={extracted_labels} -> DUPLICATE of "{resolved_node.name}" labels={resolved_labels}')
+            # TARS FIX: Validate that LLM didn't merge different entity types
+            if duplicate_idx not in type_filtered_candidates_map[relative_id]:
+                candidate = indexes.existing_nodes[duplicate_idx]
+                extracted_labels = set(extracted_node.labels) - {'Entity'}
+                candidate_labels = set(candidate.labels) - {'Entity'}
+                logger.warning(
+                    f'[TARS DEBUG] LLM dedup: REJECTED cross-type merge - "{extracted_node.name}" type={extracted_labels} -> "{candidate.name}" type={candidate_labels}. Creating new node instead.'
+                )
+                resolved_node = extracted_node
+            else:
+                resolved_node = indexes.existing_nodes[duplicate_idx]
+                extracted_labels = set(extracted_node.labels) - {'Entity'}
+                resolved_labels = set(resolved_node.labels) - {'Entity'}
+                logger.info(f'[TARS DEBUG] LLM decision: "{extracted_node.name}" labels={extracted_labels} -> DUPLICATE of "{resolved_node.name}" labels={resolved_labels}')
         else:
             logger.warning(
                 'Invalid duplicate_idx %s for extracted node %s; treating as no duplicate.',
@@ -451,6 +483,13 @@ async def extract_attributes_from_nodes(
     entity_types: dict[str, type[BaseModel]] | None = None,
     should_summarize_node: NodeSummaryFilter | None = None,
 ) -> list[EntityNode]:
+    # TARS DEBUG: Log attribute extraction start
+    logger.info(f'[TARS DEBUG] === ATTRIBUTE EXTRACTION START ===')
+    logger.info(f'[TARS DEBUG] Extracting attributes for {len(nodes)} nodes')
+    for i, node in enumerate(nodes, 1):
+        node_type = [l for l in node.labels if l != 'Entity'][0] if node.labels else 'Unknown'
+        logger.info(f'[TARS DEBUG]   Node {i}: [{node_type}] {node.name[:60]}')
+
     llm_client = clients.llm_client
     embedder = clients.embedder
     updated_nodes: list[EntityNode] = await semaphore_gather(
@@ -473,6 +512,10 @@ async def extract_attributes_from_nodes(
     )
 
     await create_entity_node_embeddings(embedder, updated_nodes)
+
+    # TARS DEBUG: Log attribute extraction completion
+    logger.info(f'[TARS DEBUG] === ATTRIBUTE EXTRACTION END ===')
+    logger.info(f'[TARS DEBUG] Completed attribute extraction for {len(updated_nodes)} nodes')
 
     return updated_nodes
 

@@ -119,13 +119,23 @@ async def extract_edges(
         else []
     )
 
+    # TARS DEBUG: Log edge types configuration
+    if edge_types_context:
+        logger.info(f'[TARS DEBUG] Edge extraction: {len(edge_types_context)} custom edge types defined')
+        for et in edge_types_context:
+            logger.info(f'[TARS DEBUG]   Edge type: {et["fact_type_name"]} - signature: {et["fact_type_signature"]}')
+    else:
+        logger.info(f'[TARS DEBUG] Edge extraction: NO custom edge types (will use generic RELATES_TO)')
+
     # Prepare context for LLM
+    nodes_context = [
+        {'id': idx, 'name': node.name, 'entity_types': node.labels}
+        for idx, node in enumerate(nodes)
+    ]
+
     context = {
         'episode_content': episode.content,
-        'nodes': [
-            {'id': idx, 'name': node.name, 'entity_types': node.labels}
-            for idx, node in enumerate(nodes)
-        ],
+        'nodes': nodes_context,
         'previous_episodes': [ep.content for ep in previous_episodes],
         'reference_time': episode.valid_at,
         'edge_types': edge_types_context,
@@ -133,11 +143,35 @@ async def extract_edges(
         'ensure_ascii': clients.ensure_ascii,
     }
 
+    # TARS DEBUG: Log what we're sending to LLM
+    logger.info(f'[TARS DEBUG] Edge extraction: Sending {len(nodes_context)} nodes to LLM')
+    for node_ctx in nodes_context:
+        node_type = [l for l in node_ctx['entity_types'] if l != 'Entity'][0] if node_ctx['entity_types'] else 'Unknown'
+        logger.info(f'[TARS DEBUG]   Node {node_ctx["id"]}: [{node_type}] {node_ctx["name"][:60]}')
+
+    logger.info(f'[TARS DEBUG] Edge extraction: Episode content length: {len(episode.content)} chars')
+
+    # TARS DEBUG: Show example of what edge_types look like in prompt
+    if edge_types_context:
+        import json
+        logger.info(f'[TARS DEBUG] Edge extraction: edge_types JSON preview:')
+        logger.info(f'[TARS DEBUG] {json.dumps(edge_types_context, indent=2)[:500]}...')
+
     facts_missed = True
     reflexion_iterations = 0
     while facts_missed and reflexion_iterations <= MAX_REFLEXION_ITERATIONS:
+        # TARS DEBUG: Log the actual prompt being sent to LLM
+        prompt_messages = prompt_library.extract_edges.edge(context)
+        logger.info(f'[TARS DEBUG] Edge extraction: Sending prompt to LLM with {len(prompt_messages)} messages')
+        for i, msg in enumerate(prompt_messages):
+            logger.info(f'[TARS DEBUG] Message {i+1} ({msg.role}): {len(msg.content)} chars')
+            # Log first 1000 chars of user message to see edge types formatting
+            if msg.role == 'user':
+                logger.info(f'[TARS DEBUG] User message preview (first 1500 chars):')
+                logger.info(f'[TARS DEBUG] {msg.content[:1500]}...')
+
         llm_response = await llm_client.generate_response(
-            prompt_library.extract_edges.edge(context),
+            prompt_messages,
             response_model=ExtractedEdges,
             max_tokens=extract_edges_max_tokens,
         )
@@ -165,6 +199,16 @@ async def extract_edges(
 
     end = time()
     logger.debug(f'Extracted new edges: {edges_data} in {(end - start) * 1000} ms')
+
+    # TARS DEBUG: Log what LLM extracted
+    logger.info(f'[TARS DEBUG] Edge extraction: LLM returned {len(edges_data)} edges')
+    for i, edge_data in enumerate(edges_data, 1):
+        src_node = nodes[edge_data.source_entity_id] if 0 <= edge_data.source_entity_id < len(nodes) else None
+        tgt_node = nodes[edge_data.target_entity_id] if 0 <= edge_data.target_entity_id < len(nodes) else None
+        if src_node and tgt_node:
+            src_type = [l for l in src_node.labels if l != 'Entity'][0] if src_node.labels else 'Unknown'
+            tgt_type = [l for l in tgt_node.labels if l != 'Entity'][0] if tgt_node.labels else 'Unknown'
+            logger.info(f'[TARS DEBUG]   Edge {i}: {src_type} --{edge_data.relation_type}--> {tgt_type}')
 
     if len(edges_data) == 0:
         return []

@@ -225,7 +225,7 @@ def _resolve_with_similarity(
         # TARS DEBUG: Log deduplication decisions
         if len(existing_matches_all) != len(existing_matches):
             filtered_count = len(existing_matches_all) - len(existing_matches)
-            logger.info(f'[TARS DEBUG] Dedup: "{node.name}" labels={node.type_labels} - filtered out {filtered_count} candidates with different types')
+            logger.info(f'[TARS DEBUG] Dedup: "{node.name}" labels={node_type_labels} - filtered out {filtered_count} candidates with different types')
 
         if len(existing_matches) == 1:
             match = existing_matches[0]

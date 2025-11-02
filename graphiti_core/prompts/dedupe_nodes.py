@@ -82,13 +82,17 @@ def node(context: dict[str, Any]) -> list[Message]:
         
         Given the above EXISTING ENTITIES and their attributes, MESSAGE, and PREVIOUS MESSAGES; Determine if the NEW ENTITY extracted from the conversation
         is a duplicate entity of one of the EXISTING ENTITIES.
-        
+
         Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
         Semantic Equivalence: if a descriptive label in existing_entities clearly refers to a named entity in context, treat them as duplicates.
 
         Do NOT mark entities as duplicates if:
         - They are related but distinct.
         - They have similar names or purposes but refer to separate instances or concepts.
+
+        **IMPORTANT**: Only mark entities as duplicates if they have the SAME entity_type labels.
+        NEVER merge entities of different types (e.g., DataSource vs MetricObservation vs Insight).
+        Different types represent fundamentally different concepts even if they have related names or content.
 
          TASK:
          1. Compare `new_entity` against each item in `existing_entities`.
@@ -119,19 +123,24 @@ def nodes(context: dict[str, Any]) -> list[Message]:
         Message(
             role='system',
             content='You are a helpful assistant that determines whether or not ENTITIES extracted from a conversation are duplicates'
-            ' of existing entities.',
+            ' of existing entities. You MUST ONLY merge entities that have identical entity_type labels.',
         ),
         Message(
             role='user',
             content=f"""
+        **CRITICAL INSTRUCTION - READ FIRST**:
+        Before comparing any entities, you MUST check if their entity_type labels match EXACTLY.
+        If entity_type labels are different, immediately return duplicate_idx=-1 (not a duplicate).
+        NEVER merge entities of different types (e.g., DataSource vs MetricObservation vs Insight).
+
         <PREVIOUS MESSAGES>
         {to_prompt_json([ep for ep in context['previous_episodes']], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </PREVIOUS MESSAGES>
         <CURRENT MESSAGE>
         {context['episode_content']}
         </CURRENT MESSAGE>
-        
-        
+
+
         Each of the following ENTITIES were extracted from the CURRENT MESSAGE.
         Each entity in ENTITIES is represented as a JSON object with the following structure:
         {{
@@ -159,11 +168,24 @@ def nodes(context: dict[str, Any]) -> list[Message]:
 
         For each of the above ENTITIES, determine if the entity is a duplicate of any of the EXISTING ENTITIES.
 
-        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
+        **MANDATORY TYPE-CHECKING PROCESS**:
+        1. FIRST: Compare entity_type labels of the ENTITY with each EXISTING ENTITY
+        2. If entity_type labels differ → SKIP that candidate (not a duplicate)
+        3. ONLY if entity_type labels match exactly → proceed to compare names and content
+
+        Entities should only be considered duplicates if BOTH conditions are met:
+        a) They have IDENTICAL entity_type labels (excluding 'Entity')
+        b) They refer to the *same real-world object or concept*
 
         Do NOT mark entities as duplicates if:
-        - They are related but distinct.
-        - They have similar names or purposes but refer to separate instances or concepts.
+        - They have different entity_type labels (CRITICAL - check this FIRST)
+        - They are related but distinct
+        - They have similar names or purposes but refer to separate instances or concepts
+
+        **EXAMPLES OF FORBIDDEN MERGES**:
+        - DataSource (file) ↔ MetricObservation (calculated metrics) → NEVER merge
+        - MetricObservation (data) ↔ Insight (conclusion) → NEVER merge
+        - Any entity with different type labels → NEVER merge
 
         Task:
         Respond with a JSON object that contains an "entity_resolutions" array with one entry for each entity in ENTITIES, ordered by the entity id.

@@ -69,7 +69,7 @@ def edge(context: dict[str, Any]) -> list[Message]:
             role='user',
             content=f"""
 <FACT TYPES>
-{context['edge_types']}
+{to_prompt_json(context['edge_types'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
 </FACT TYPES>
 
 <PREVIOUS_MESSAGES>
@@ -81,7 +81,7 @@ def edge(context: dict[str, Any]) -> list[Message]:
 </CURRENT_MESSAGE>
 
 <ENTITIES>
-{context['nodes']} 
+{to_prompt_json(context['nodes'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
 </ENTITIES>
 
 <REFERENCE_TIME>
@@ -89,19 +89,76 @@ def edge(context: dict[str, Any]) -> list[Message]:
 </REFERENCE_TIME>
 
 # TASK
-Extract all factual relationships between the given ENTITIES based on the CURRENT MESSAGE.
-Only extract facts that:
-- involve two DISTINCT ENTITIES from the ENTITIES list,
-- are clearly stated or unambiguously implied in the CURRENT MESSAGE,
-    and can be represented as edges in a knowledge graph.
-- Facts should include entity names rather than pronouns whenever possible.
-- The FACT TYPES provide a list of the most important types of facts, make sure to extract facts of these types
-- The FACT TYPES are not an exhaustive list, extract all facts from the message even if they do not fit into one
-    of the FACT TYPES
-- The FACT TYPES each contain their fact_type_signature which represents the source and target entity types.
+Extract factual relationships between the given ENTITIES based on the CURRENT MESSAGE.
+
+**STEP 1 - CHECK IF FACT TYPES PROVIDED**:
+- If FACT TYPES list is empty → you may use generic relation_type names
+- If FACT TYPES list is NOT empty → YOU MUST FOLLOW STEPS 2-4 BELOW
+
+**STEP 2 - UNDERSTAND FACT_TYPE_SIGNATURE DIRECTION**:
+The fact_type_signature is an array: [SOURCE_TYPE, TARGET_TYPE]
+- First element = source entity type (where arrow starts FROM)
+- Second element = target entity type (where arrow points TO)
+- Example: ["MetricObservation", "DataSource"] means:
+  * SOURCE entity must be MetricObservation
+  * TARGET entity must be DataSource
+  * Direction: MetricObservation → DataSource
+
+**STEP 3 - MANDATORY TYPE MATCHING** (if FACT TYPES provided):
+For each potential relationship, you MUST:
+a) Identify source entity's type (excluding 'Entity' label)
+b) Identify target entity's type (excluding 'Entity' label)
+c) Check if ANY FACT TYPE has fact_type_signature where:
+   - fact_type_signature[0] == source entity type
+   - fact_type_signature[1] == target entity type
+d) If NO EXACT MATCH → DO NOT extract this relationship
+
+**STEP 4 - USE EXACT RELATION NAME** (if FACT TYPES provided):
+- Use the EXACT fact_type_name from the matching FACT TYPE
+- Example: If FACT TYPE says "DERIVED_FROM" → use "DERIVED_FROM"
+- NEVER use generic names like "RELATES_TO" when FACT TYPES are provided
+
+**STEP 5 - REJECT INVALID RELATIONSHIPS** (if FACT TYPES provided):
+DO NOT extract relationships that:
+- Have entity types NOT matching any fact_type_signature IN THE CORRECT ORDER
+- Connect entities of same type (unless explicitly in FACT TYPES)
+- Use relation_type names not in FACT TYPES list
+- Have reversed direction (signature[0] must be source, signature[1] must be target)
 
 You may use information from the PREVIOUS MESSAGES only to disambiguate references or support continuity.
 
+**EXAMPLE** (if FACT TYPES provided):
+
+FACT TYPES: [
+  {{"fact_type_name": "DERIVED_FROM", "fact_type_signature": ["MetricObservation", "DataSource"], ...}}
+]
+
+This means: MetricObservation (source) → DataSource (target)
+
+ENTITIES: [
+  {{"id": 0, "name": "Store A Metrics", "entity_types": ["Entity", "MetricObservation"]}},
+  {{"id": 1, "name": "Sales_Data.csv", "entity_types": ["Entity", "DataSource"]}}
+]
+
+✅ CORRECT extraction:
+{{
+  "relation_type": "DERIVED_FROM",
+  "source_entity_id": 0,  # MetricObservation (matches signature[0])
+  "target_entity_id": 1   # DataSource (matches signature[1])
+}}
+
+❌ WRONG extractions:
+1. Using wrong relation name:
+   {{"relation_type": "RELATES_TO", "source_entity_id": 0, "target_entity_id": 1}}
+   (RELATES_TO not in FACT TYPES)
+
+2. Reversed direction:
+   {{"relation_type": "DERIVED_FROM", "source_entity_id": 1, "target_entity_id": 0}}
+   (DataSource → MetricObservation doesn't match signature ["MetricObservation", "DataSource"])
+
+3. Wrong entity types:
+   {{"relation_type": "DERIVED_FROM", "source_entity_id": 0, "target_entity_id": 0}}
+   (MetricObservation → MetricObservation doesn't match signature)
 
 {context['custom_prompt']}
 
@@ -109,11 +166,16 @@ You may use information from the PREVIOUS MESSAGES only to disambiguate referenc
 
 1. Only emit facts where both the subject and object match IDs in ENTITIES.
 2. Each fact must involve two **distinct** entities.
-3. Use a SCREAMING_SNAKE_CASE string as the `relation_type` (e.g., FOUNDED, WORKS_AT).
-4. Do not emit duplicate or semantically redundant facts.
-5. The `fact_text` should closely paraphrase the original source sentence(s). Do not verbatim quote the original text.
-6. Use `REFERENCE_TIME` to resolve vague or relative temporal expressions (e.g., "last week").
-7. Do **not** hallucinate or infer temporal bounds from unrelated events.
+3. **CRITICAL**: If FACT TYPES are provided, ONLY extract facts that match one of the FACT TYPES:
+   a. Check the source entity type matches the first element of fact_type_signature
+   b. Check the target entity type matches the second element of fact_type_signature
+   c. Use the EXACT relation_type name from FACT TYPES (not generic names like "RELATES_TO")
+   d. If no FACT TYPE matches the entity types involved, DO NOT extract that relationship
+4. If FACT TYPES are NOT provided (empty list), use a SCREAMING_SNAKE_CASE string as the `relation_type` (e.g., FOUNDED, WORKS_AT).
+5. Do not emit duplicate or semantically redundant facts.
+6. The `fact_text` should closely paraphrase the original source sentence(s). Do not verbatim quote the original text.
+7. Use `REFERENCE_TIME` to resolve vague or relative temporal expressions (e.g., "last week").
+8. Do **not** hallucinate or infer temporal bounds from unrelated events.
 
 # DATETIME RULES
 
