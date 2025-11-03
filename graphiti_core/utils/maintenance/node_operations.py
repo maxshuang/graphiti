@@ -97,25 +97,24 @@ async def extract_nodes(
     entities_missed = True
     reflexion_iterations = 0
 
-    entity_types_context = [
-        {
-            'entity_type_id': 0,
-            'entity_type_name': 'Entity',
-            'entity_type_description': 'Default entity classification. Use this entity type if the entity is not one of the other listed types.',
-        }
-    ]
-
-    entity_types_context += (
+    # Only include custom entity types if provided, no generic "Entity" fallback
+    entity_types_context = (
         [
             {
-                'entity_type_id': i + 1,
+                'entity_type_id': i,
                 'entity_type_name': type_name,
                 'entity_type_description': type_model.__doc__,
             }
             for i, (type_name, type_model) in enumerate(entity_types.items())
         ]
         if entity_types is not None
-        else []
+        else [
+            {
+                'entity_type_id': 0,
+                'entity_type_name': 'Entity',
+                'entity_type_description': 'Default entity classification. Use this entity type if the entity is not one of the other listed types.',
+            }
+        ]
     )
 
     context = {

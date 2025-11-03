@@ -181,7 +181,11 @@ Indicate the classified entity type by providing its entity_type_id.
 {context['custom_prompt']}
 
 Guidelines:
-1. Extract significant entities, concepts, or actors mentioned in the conversation.
+1. Extract ONLY entities that match the provided ENTITY TYPES. For each type, extract significant CONCRETE entities:
+   - DataSource: Extract when text describes a FILE, TABLE, DATABASE, or DATA SYSTEM (e.g., "Sales_Data.csv", "POS database")
+   - MetricObservation: Extract when text contains QUANTITATIVE METRICS with VALUES (e.g., "variance: +3.0%", "scheduled: 1000hrs")
+   - Insight: Extract when text states a CONCLUSION, PATTERN, or FINDING (e.g., "variance exceeds threshold", "trend increasing")
+   - DO NOT extract meta-descriptions, concepts, or abstract notions (e.g., "data collection scope", "analysis framework", "methodology")
 2. Avoid creating nodes for relationships or actions.
 3. Avoid creating nodes for temporal information like dates, times or years (these will be added to edges later).
 4. Be as explicit as possible in your node names, using full names and avoiding abbreviations.
