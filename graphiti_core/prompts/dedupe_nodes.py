@@ -63,42 +63,26 @@ def node(context: dict[str, Any]) -> list[Message]:
         Message(
             role='user',
             content=f"""
-        <PREVIOUS MESSAGES>
-        {to_prompt_json([ep for ep in context['previous_episodes']], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
-        </PREVIOUS MESSAGES>
-        <CURRENT MESSAGE>
-        {context['episode_content']}
-        </CURRENT MESSAGE>
         <NEW ENTITY>
         {to_prompt_json(context['extracted_node'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
         </NEW ENTITY>
-        <ENTITY TYPE DESCRIPTION>
-        {to_prompt_json(context['entity_type_description'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
-        </ENTITY TYPE DESCRIPTION>
 
         <EXISTING ENTITIES>
         {to_prompt_json(context['existing_nodes'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
         </EXISTING ENTITIES>
-        
-        Given the above EXISTING ENTITIES and their attributes, MESSAGE, and PREVIOUS MESSAGES; Determine if the NEW ENTITY extracted from the conversation
-        is a duplicate entity of one of the EXISTING ENTITIES.
 
-        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
-        Semantic Equivalence: if a descriptive label in existing_entities clearly refers to a named entity in context, treat them as duplicates.
+        Determine if the NEW ENTITY is a duplicate of any entity in EXISTING ENTITIES.
 
-        Do NOT mark entities as duplicates if:
-        - They are related but distinct.
-        - They have similar names or purposes but refer to separate instances or concepts.
+        Two entities are duplicates ONLY if ALL of these conditions are met:
+        1. IDENTICAL entity_type labels (excluding 'Entity')
+        2. IDENTICAL semantic meaning - read the actual field values to verify what each entity represents
+        3. Measure or describe the SAME aspects (not just related to the same subject)
 
-        **IMPORTANT**: Only mark entities as duplicates if they have the SAME entity_type labels.
-        NEVER merge entities of different types (e.g., DataSource vs MetricObservation vs Insight).
-        Different types represent fundamentally different concepts even if they have related names or content.
-
-         TASK:
-         1. Compare `new_entity` against each item in `existing_entities`.
-         2. If it refers to the same real-world object or concept, collect its index.
-         3. Let `duplicate_idx` = the smallest collected index, or -1 if none.
-         4. Let `duplicates` = the sorted list of all collected indices (empty list if none).
+        Important:
+        - Name similarity alone is NOT sufficient - similar names can represent different things
+        - Same subject + same time period is NOT sufficient - one subject can have multiple different measurements
+        - You MUST read the actual content in fields (not just field names) to determine if entities measure/describe the same thing
+        - When in doubt, do NOT merge
 
         Respond with a JSON object containing an "entity_resolutions" array with a single entry:
         {{
@@ -128,28 +112,6 @@ def nodes(context: dict[str, Any]) -> list[Message]:
         Message(
             role='user',
             content=f"""
-        **CRITICAL INSTRUCTION - READ FIRST**:
-        Before comparing any entities, you MUST check if their entity_type labels match EXACTLY.
-        If entity_type labels are different, immediately return duplicate_idx=-1 (not a duplicate).
-        NEVER merge entities of different types (e.g., DataSource vs MetricObservation vs Insight).
-
-        <PREVIOUS MESSAGES>
-        {to_prompt_json([ep for ep in context['previous_episodes']], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
-        </PREVIOUS MESSAGES>
-        <CURRENT MESSAGE>
-        {context['episode_content']}
-        </CURRENT MESSAGE>
-
-
-        Each of the following ENTITIES were extracted from the CURRENT MESSAGE.
-        Each entity in ENTITIES is represented as a JSON object with the following structure:
-        {{
-            id: integer id of the entity,
-            name: "name of the entity",
-            entity_type: ["Entity", "<optional additional label>", ...],
-            entity_type_description: "Description of what the entity type represents"
-        }}
-
         <ENTITIES>
         {to_prompt_json(context['extracted_nodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </ENTITIES>
@@ -158,34 +120,18 @@ def nodes(context: dict[str, Any]) -> list[Message]:
         {to_prompt_json(context['existing_nodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </EXISTING ENTITIES>
 
-        Each entry in EXISTING ENTITIES is an object with the following structure:
-        {{
-            idx: integer index of the candidate entity (use this when referencing a duplicate),
-            name: "name of the candidate entity",
-            entity_types: ["Entity", "<optional additional label>", ...],
-            ...<additional attributes such as summaries or metadata>
-        }}
+        For each entity in ENTITIES, determine if it is a duplicate of any entity in EXISTING ENTITIES.
 
-        For each of the above ENTITIES, determine if the entity is a duplicate of any of the EXISTING ENTITIES.
+        Two entities are duplicates ONLY if ALL of these conditions are met:
+        1. IDENTICAL entity_type labels (excluding 'Entity')
+        2. IDENTICAL semantic meaning - read the actual field values to verify what each entity represents
+        3. Measure or describe the SAME aspects (not just related to the same subject)
 
-        **MANDATORY TYPE-CHECKING PROCESS**:
-        1. FIRST: Compare entity_type labels of the ENTITY with each EXISTING ENTITY
-        2. If entity_type labels differ → SKIP that candidate (not a duplicate)
-        3. ONLY if entity_type labels match exactly → proceed to compare names and content
-
-        Entities should only be considered duplicates if BOTH conditions are met:
-        a) They have IDENTICAL entity_type labels (excluding 'Entity')
-        b) They refer to the *same real-world object or concept*
-
-        Do NOT mark entities as duplicates if:
-        - They have different entity_type labels (CRITICAL - check this FIRST)
-        - They are related but distinct
-        - They have similar names or purposes but refer to separate instances or concepts
-
-        **EXAMPLES OF FORBIDDEN MERGES**:
-        - DataSource (file) ↔ MetricObservation (calculated metrics) → NEVER merge
-        - MetricObservation (data) ↔ Insight (conclusion) → NEVER merge
-        - Any entity with different type labels → NEVER merge
+        Important:
+        - Name similarity alone is NOT sufficient - similar names can represent different things
+        - Same subject + same time period is NOT sufficient - one subject can have multiple different measurements
+        - You MUST read the actual content in fields (not just field names) to determine if entities measure/describe the same thing
+        - When in doubt, do NOT merge
 
         Task:
         Respond with a JSON object that contains an "entity_resolutions" array with one entry for each entity in ENTITIES, ordered by the entity id.

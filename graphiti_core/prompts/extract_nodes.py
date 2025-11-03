@@ -267,13 +267,17 @@ def extract_attributes(context: dict[str, Any]) -> list[Message]:
         {to_prompt_json(context['episode_content'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </MESSAGES>
 
-        Given the above MESSAGES and the following ENTITY, update any of its attributes based on the information provided
-        in MESSAGES. Use the provided attribute descriptions to better understand how each attribute should be determined.
+        Given the above MESSAGES and the following ENTITY, extract and populate its attributes based on the information provided
+        in MESSAGES.
 
         Guidelines:
-        1. Do not hallucinate entity property values if they cannot be found in the current context.
-        2. Only use the provided MESSAGES and ENTITY to set attribute values.
-        
+        1. **Follow field descriptions exactly**: Each attribute has a description that explains what should be extracted and how. Read these carefully.
+        2. **Extract quantitative values**: If an attribute description asks for "values", "metrics", or "measurements", extract the actual numbers, percentages, or quantities from MESSAGES.
+        3. **Be specific and concrete**: Avoid generic descriptions. Instead of "metric results", extract "scheduled_hours=3531.62, actual_hours=3623.4, variance=+2.6%".
+        4. **Use examples from field descriptions**: If a field description provides an example format, follow that format when extracting similar data.
+        5. Do not hallucinate values if they cannot be found in the current context.
+        6. Only use the provided MESSAGES and ENTITY to set attribute values.
+
         <ENTITY>
         {context['node']}
         </ENTITY>

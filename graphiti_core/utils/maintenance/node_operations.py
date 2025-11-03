@@ -261,13 +261,16 @@ async def _resolve_with_llm(
 
     extracted_nodes_context = [
         {
-            'id': i,
-            'name': node.name,
-            'entity_type': node.labels,
-            'entity_type_description': entity_types_dict.get(
-                next((item for item in node.labels if item != 'Entity'), '')
-            ).__doc__
-            or 'Default Entity Type',
+            **{
+                'id': i,
+                'name': node.name,
+                'entity_type': node.labels,
+                'entity_type_description': entity_types_dict.get(
+                    next((item for item in node.labels if item != 'Entity'), '')
+                ).__doc__
+                or 'Default Entity Type',
+            },
+            **node.attributes,  # TARS FIX: Include attributes for semantic comparison
         }
         for i, node in enumerate(llm_extracted_nodes)
     ]
@@ -318,8 +321,30 @@ async def _resolve_with_llm(
 
     logger.info(f'[TARS DEBUG] LLM dedup: Calling LLM with {len(extracted_nodes_context)} extracted nodes and {len(existing_nodes_context)} existing candidates')
 
+    # TARS DEBUG: Log what attributes are being sent to LLM (show ALL nodes, FULL attributes - no truncation)
+    logger.info(f'[TARS DEBUG] === EXTRACTED NODES SENT TO DEDUP LLM (ALL {len(extracted_nodes_context)} nodes) ===')
+    for i, node_ctx in enumerate(extracted_nodes_context):
+        attrs_full = {k: v for k, v in node_ctx.items() if k not in ['id', 'name', 'entity_type', 'entity_type_description']}
+        logger.info(f'[TARS DEBUG] Extracted node {i}: "{node_ctx["name"]}"')
+        logger.info(f'[TARS DEBUG]   FULL Attributes: {attrs_full}')
+
+    logger.info(f'[TARS DEBUG] === EXISTING NODES SENT TO DEDUP LLM (ALL {len(existing_nodes_context)} nodes) ===')
+    for i, node_ctx in enumerate(existing_nodes_context):
+        attrs_full = {k: v for k, v in node_ctx.items() if k not in ['idx', 'name', 'entity_types']}
+        logger.info(f'[TARS DEBUG] Existing node {i}: "{node_ctx["name"]}"')
+        logger.info(f'[TARS DEBUG]   FULL Attributes: {attrs_full}')
+
+    # TARS DEBUG: Log the actual prompt being sent to LLM (FULL, no truncation)
+    dedup_prompt = prompt_library.dedupe_nodes.nodes(context)
+    logger.info(f'[TARS DEBUG] === FULL DEDUP PROMPT SENT TO LLM ===')
+    for i, msg in enumerate(dedup_prompt):
+        logger.info(f'[TARS DEBUG] Message {i+1} - Role: {msg.role}')
+        logger.info(f'[TARS DEBUG] Message {i+1} - Content length: {len(msg.content)} chars')
+        logger.info(f'[TARS DEBUG] Message {i+1} - FULL CONTENT:\n{msg.content}')
+        logger.info(f'[TARS DEBUG] === END OF MESSAGE {i+1} ===')
+
     llm_response = await llm_client.generate_response(
-        prompt_library.dedupe_nodes.nodes(context),
+        dedup_prompt,
         response_model=NodeResolutions,
     )
 
@@ -394,15 +419,30 @@ async def resolve_extracted_nodes(
     llm_client = clients.llm_client
     driver = clients.driver
 
+    # TARS FIX: Extract attributes BEFORE deduplication so LLM can compare semantic content
+    logger.info(f'[TARS DEBUG] === ATTRIBUTE EXTRACTION (PRE-DEDUP) START ===')
+    logger.info(f'[TARS DEBUG] Extracting attributes for {len(extracted_nodes)} nodes before deduplication')
+
+    extracted_nodes_with_attrs = await extract_attributes_from_nodes(
+        clients,
+        extracted_nodes,
+        episode,
+        previous_episodes,
+        entity_types,
+        should_summarize_node=None,  # Don't summarize yet, just extract attributes
+    )
+
+    logger.info(f'[TARS DEBUG] === ATTRIBUTE EXTRACTION (PRE-DEDUP) END ===')
+
     # TARS LOG: Start deduplication
     logger.info(f'[TARS DEBUG] === DEDUPLICATION START ===')
-    logger.info(f'[TARS DEBUG] Extracted nodes to dedupe: {len(extracted_nodes)}')
-    for i, node in enumerate(extracted_nodes):
+    logger.info(f'[TARS DEBUG] Extracted nodes to dedupe: {len(extracted_nodes_with_attrs)}')
+    for i, node in enumerate(extracted_nodes_with_attrs):
         logger.info(f'[TARS DEBUG]   Extracted {i+1}: "{node.name}" labels={set(node.labels) - {"Entity"}}')
 
     existing_nodes = await _collect_candidate_nodes(
         clients,
-        extracted_nodes,
+        extracted_nodes_with_attrs,
         existing_nodes_override,
     )
 
@@ -415,21 +455,21 @@ async def resolve_extracted_nodes(
     indexes: DedupCandidateIndexes = _build_candidate_indexes(existing_nodes)
 
     state = DedupResolutionState(
-        resolved_nodes=[None] * len(extracted_nodes),
+        resolved_nodes=[None] * len(extracted_nodes_with_attrs),
         uuid_map={},
         unresolved_indices=[],
     )
 
     logger.info(f'[TARS DEBUG] --- Phase 1: Similarity-based deduplication ---')
-    _resolve_with_similarity(extracted_nodes, indexes, state)
+    _resolve_with_similarity(extracted_nodes_with_attrs, indexes, state)
 
     resolved_count = sum(1 for n in state.resolved_nodes if n is not None)
-    logger.info(f'[TARS DEBUG] After similarity matching: {resolved_count}/{len(extracted_nodes)} resolved, {len(state.unresolved_indices)} unresolved')
+    logger.info(f'[TARS DEBUG] After similarity matching: {resolved_count}/{len(extracted_nodes_with_attrs)} resolved, {len(state.unresolved_indices)} unresolved')
 
     logger.info(f'[TARS DEBUG] --- Phase 2: LLM-based deduplication ---')
     await _resolve_with_llm(
         llm_client,
-        extracted_nodes,
+        extracted_nodes_with_attrs,
         indexes,
         state,
         clients.ensure_ascii,
@@ -439,20 +479,20 @@ async def resolve_extracted_nodes(
     )
 
     resolved_count = sum(1 for n in state.resolved_nodes if n is not None)
-    logger.info(f'[TARS DEBUG] After LLM dedup: {resolved_count}/{len(extracted_nodes)} resolved')
+    logger.info(f'[TARS DEBUG] After LLM dedup: {resolved_count}/{len(extracted_nodes_with_attrs)} resolved')
 
-    for idx, node in enumerate(extracted_nodes):
+    for idx, node in enumerate(extracted_nodes_with_attrs):
         if state.resolved_nodes[idx] is None:
             state.resolved_nodes[idx] = node
             state.uuid_map[node.uuid] = node.uuid
 
     logger.info(f'[TARS DEBUG] --- Final Resolution Summary ---')
-    new_nodes_count = sum(1 for extracted, resolved in zip(extracted_nodes, state.resolved_nodes) if extracted.uuid == resolved.uuid)
-    merged_nodes_count = len(extracted_nodes) - new_nodes_count
+    new_nodes_count = sum(1 for extracted, resolved in zip(extracted_nodes_with_attrs, state.resolved_nodes) if extracted.uuid == resolved.uuid)
+    merged_nodes_count = len(extracted_nodes_with_attrs) - new_nodes_count
     logger.info(f'[TARS DEBUG] New nodes to create: {new_nodes_count}')
     logger.info(f'[TARS DEBUG] Nodes merged with existing: {merged_nodes_count}')
 
-    for i, (extracted, resolved) in enumerate(zip(extracted_nodes, state.resolved_nodes)):
+    for i, (extracted, resolved) in enumerate(zip(extracted_nodes_with_attrs, state.resolved_nodes)):
         if resolved:
             extracted_labels = set(extracted.labels) - {'Entity'}
             resolved_labels = set(resolved.labels) - {'Entity'}
